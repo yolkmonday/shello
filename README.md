@@ -94,6 +94,10 @@ bun run tauri dev
 
 Tag pushes (`v*`) trigger `.github/workflows/release.yml`, which builds a universal `.dmg` (arm64 + x64) and uploads it to a GitHub Release. See [`docs/homebrew-tap.md`](docs/homebrew-tap.md) for tap setup and the cask update flow.
 
+## Code signing
+
+Windows releases are code-signed via free code signing provided by [SignPath.io](https://signpath.io), with a certificate issued by the [SignPath Foundation](https://signpath.org). macOS and Linux builds are currently unsigned.
+
 ## Contributing
 
 Issues and pull requests are welcome. Please open an issue to discuss substantial changes before submitting a PR.
