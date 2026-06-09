@@ -3,6 +3,7 @@ mod crypto;
 mod registry;
 mod vault;
 mod ssh;
+mod sftp;
 
 use db::DbPool;
 use vault::VaultState;
@@ -12,7 +13,7 @@ use db::custom_recipes::{self, CustomRecipe, CreateRecipeInput, UpdateRecipeInpu
 use ssh::session::SessionManager;
 use ssh::types::{ConnectionConfig, AuthMethod, SessionInfo, OsInfo};
 use ssh::keys::SshKeyInfo;
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -381,6 +382,7 @@ pub fn run() {
             Ok(())
         })
         .manage(SessionManager::new())
+        .manage(sftp::SftpManager::new())
         .invoke_handler(tauri::generate_handler![
             greet,
             ssh_connect,
@@ -423,6 +425,19 @@ pub fn run() {
             vault::vault_lock,
             vault::vault_change_password,
             vault::vault_forget_device,
+            sftp::sftp_open,
+            sftp::sftp_list,
+            sftp::sftp_local_list,
+            sftp::sftp_local_home,
+            sftp::sftp_mkdir,
+            sftp::sftp_delete,
+            sftp::sftp_rename,
+            sftp::sftp_create_file,
+            sftp::sftp_chmod,
+            sftp::sftp_download,
+            sftp::sftp_upload,
+            sftp::sftp_cancel,
+            sftp::sftp_close,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

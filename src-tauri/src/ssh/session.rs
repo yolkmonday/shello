@@ -28,6 +28,30 @@ impl SessionManager {
         Ok(session_id)
     }
 
+    /// Open an SSH channel and request the SFTP subsystem on an existing
+    /// session. The channel is returned ready to be wrapped in an SftpSession.
+    /// Holds the sessions lock briefly during the channel handshake, like
+    /// `open_pty` (russh `Handle` is not `Clone`).
+    pub async fn open_sftp_channel(
+        &self,
+        session_id: &str,
+    ) -> Result<russh::Channel<russh::client::Msg>> {
+        let sessions = self.sessions.lock().await;
+        let client = sessions
+            .get(session_id)
+            .context(format!("Session not found: {}", session_id))?;
+        let channel = client
+            .handle()
+            .channel_open_session()
+            .await
+            .context("Failed to open SFTP channel")?;
+        channel
+            .request_subsystem(true, "sftp")
+            .await
+            .context("Failed to request sftp subsystem")?;
+        Ok(channel)
+    }
+
     /// Open a PTY on an existing session.
     /// Note: russh Handle does NOT implement Clone, so we hold the
     /// sessions lock during PTY open. This blocks other session
