@@ -1,0 +1,46 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root,
+  :root[data-theme="dark"] {
+    --otter-dark: 18 18 20;
+    --otter-surface: 26 26 29;
+    --otter-card: 34 34 37;
+    --otter-border: 46 46 51;
+    --otter-teal: 45 212 168;
+    --otter-teal-dim: 30 158 122;
+    --otter-amber: 250 204 21;
+    --otter-coral: 248 113 113;
+    --otter-blue: 96 165 250;
+    --otter-purple: 167 139 250;
+    --otter-text: 237 237 240;
+    --otter-muted: 152 152 163;
+    --otter-subtle: 92 92 103;
+  }
+
+  :root[data-theme="light"] {
+    --otter-dark: 234 234 237;
+    --otter-surface: 224 224 228;
+    --otter-card: 245 245 247;
+    --otter-border: 204 204 208;
+    --otter-teal: 30 158 122;
+    --otter-teal-dim: 22 138 106;
+    --otter-amber: 202 138 4;
+    --otter-coral: 220 38 38;
+    --otter-blue: 37 99 235;
+    --otter-purple: 124 58 237;
+    --otter-text: 30 30 30;
+    --otter-muted: 85 85 96;
+    --otter-subtle: 138 138 150;
+  }
+
+  body {
+    @apply bg-otter-dark text-otter-text font-body;
+  }
+
+  ::selection {
+    @apply bg-otter-teal text-otter-dark;
+  }
+}

@@ -1,0 +1,53 @@
+name: release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+jobs:
+  build-macos:
+    runs-on: macos-14
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin,x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: bun install
+
+      - name: Build Tauri app (universal)
+        run: bun run tauri build --target universal-apple-darwin
+
+      - name: Collect artifact
+        id: artifacts
+        run: |
+          cd src-tauri/target/universal-apple-darwin/release/bundle
+          DMG=$(ls dmg/*.dmg | head -n1)
+          NEW_NAME="Shello_${{ github.ref_name }}_universal.dmg"
+          cp "$DMG" "/tmp/$NEW_NAME"
+          shasum -a 256 "/tmp/$NEW_NAME" | awk '{print $1}' > "/tmp/$NEW_NAME.sha256"
+          echo "dmg=/tmp/$NEW_NAME" >> $GITHUB_OUTPUT
+          echo "sha=/tmp/$NEW_NAME.sha256" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.artifacts.outputs.dmg }}
+            ${{ steps.artifacts.outputs.sha }}
+          generate_release_notes: true
+          draft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
