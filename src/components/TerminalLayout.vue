@@ -15,6 +15,7 @@ import RecipeRunner from "./RecipeRunner.vue";
 import KeyManager from "./KeyManager.vue";
 import ScreenshotPreview from "./ScreenshotPreview.vue";
 import RecordingPreview from "./RecordingPreview.vue";
+import SftpView from "./sftp/SftpView.vue";
 import LogoIcon from "./LogoIcon.vue";
 import LogoWordmark from "./LogoWordmark.vue";
 import { Icon } from "@iconify/vue";
@@ -25,8 +26,19 @@ import type { TerminalRecording } from "../lib/terminal-recording";
 const store = useTerminalStore();
 const profilesStore = useProfilesStore();
 
-// Current view: "home" | "settings" | session id
+// Current view: "home" | "settings" | session id | "sftp:<session id>"
 const currentView = ref<string>("home");
+
+const sftpTitles = ref<Record<string, string>>({});
+
+// True only when a real terminal session is the active view (not home,
+// settings, or an SFTP view). Drives the session-specific top toolbar.
+const isTerminalSession = computed(
+  () =>
+    currentView.value !== "home" &&
+    currentView.value !== "settings" &&
+    !currentView.value.startsWith("sftp:"),
+);
 
 
 function parseQuickConnect(input: string): { username: string; host: string; port: number } | null {
@@ -371,7 +383,9 @@ function handleGlobalKeydown(e: KeyboardEvent) {
 
   if (meta && e.key === "w") {
     e.preventDefault();
-    if (currentView.value !== "home" && currentView.value !== "settings") {
+    if (currentView.value.startsWith("sftp:")) {
+      closeSftp(currentView.value.slice(5));
+    } else if (currentView.value !== "home" && currentView.value !== "settings") {
       requestCloseSession(currentView.value);
     }
   }
@@ -904,6 +918,56 @@ const filteredHomeProfiles = computed(() => {
   return list;
 });
 
+async function openSftpFromGrid(profile: ProfileSummary) {
+  // Reuse an existing connected session for this profile, otherwise connect.
+  let sessionId = Object.values(store.sessions).find(
+    (s) => s.profile_id === profile.id && s.status === "connected",
+  )?.id;
+
+  if (!sessionId) {
+    onConnecting(profile);
+    try {
+      sessionId = await invoke<string>("profile_connect", {
+        profileId: profile.id,
+        cols: 80,
+        rows: 24,
+        timeoutSecs: store.connectTimeout,
+      });
+      store.addSession(sessionId, {
+        id: sessionId,
+        host: profile.host,
+        port: profile.port,
+        username: profile.username,
+        connected_at: new Date().toISOString(),
+        status: "connected",
+        profile_id: profile.id,
+        profile_name: profile.name,
+      });
+      onConnectDone(null);
+      recordLastConnected(profile.id);
+      detectOs(sessionId, profile.id);
+    } catch (e) {
+      const err = String(e);
+      if (err.includes("vault_locked")) {
+        onConnectDone(null);
+        handleVaultLocked(() => openSftpFromGrid(profile));
+      } else {
+        onConnectDone(err);
+      }
+      return;
+    }
+  }
+
+  sftpTitles.value[sessionId] = profile.name;
+  currentView.value = "sftp:" + sessionId;
+}
+
+function closeSftp(sessionId: string) {
+  if (currentView.value === "sftp:" + sessionId) {
+    currentView.value = store.sessions[sessionId] ? sessionId : "home";
+  }
+}
+
 function getGroup(groupId: string | null): Group | null {
   if (!groupId) return null;
   return profilesStore.groups[groupId] ?? null;
@@ -1130,7 +1194,7 @@ async function connectFromGrid(profile: ProfileSummary) {
         </button>
         <!-- Log toggle -->
         <button
-          v-if="currentView !== 'home' && currentView !== 'settings'"
+          v-if="isTerminalSession"
           class="flex items-center justify-center w-9 h-full transition-colors border-r border-otter-border"
           :class="loggingSessions.has(currentView)
             ? 'text-otter-coral'
@@ -1142,7 +1206,7 @@ async function connectFromGrid(profile: ProfileSummary) {
         </button>
         <!-- Split buttons -->
         <button
-          v-if="currentView !== 'home' && currentView !== 'settings'"
+          v-if="isTerminalSession"
           class="flex items-center justify-center w-9 h-full transition-colors border-r border-otter-border"
           :class="splitDirection === 'horizontal' ? 'text-otter-teal' : 'text-otter-muted hover:text-otter-text'"
           title="Split Horizontal"
@@ -1151,7 +1215,7 @@ async function connectFromGrid(profile: ProfileSummary) {
           <Icon icon="mdi:dock-right" class="w-4 h-4" />
         </button>
         <button
-          v-if="currentView !== 'home' && currentView !== 'settings'"
+          v-if="isTerminalSession"
           class="flex items-center justify-center w-9 h-full transition-colors border-r border-otter-border"
           :class="splitDirection === 'vertical' ? 'text-otter-teal' : 'text-otter-muted hover:text-otter-text'"
           title="Split Vertical"
@@ -1160,7 +1224,7 @@ async function connectFromGrid(profile: ProfileSummary) {
           <Icon icon="mdi:dock-bottom" class="w-4 h-4" />
         </button>
         <button
-          v-if="currentView !== 'home' && currentView !== 'settings'"
+          v-if="isTerminalSession"
           class="flex items-center justify-center w-9 h-full transition-colors border-r border-otter-border"
           :class="splitDirection === 'quad' ? 'text-otter-teal' : 'text-otter-muted hover:text-otter-text'"
           title="Split Quad"
@@ -1184,6 +1248,14 @@ async function connectFromGrid(profile: ProfileSummary) {
 
     <!-- Main content area -->
     <div class="flex-1 overflow-hidden relative">
+      <SftpView
+        v-if="currentView.startsWith('sftp:')"
+        :key="currentView"
+        :session-id="currentView.slice(5)"
+        :title="sftpTitles[currentView.slice(5)]"
+        class="absolute inset-0 z-10"
+        @close="closeSftp(currentView.slice(5))"
+      />
       <!-- Connection loading overlay -->
       <Transition name="fade">
         <div
@@ -1380,6 +1452,19 @@ async function connectFromGrid(profile: ProfileSummary) {
                 <span class="inline-block w-4 h-4 border-2 border-otter-teal border-t-transparent rounded-full animate-spin"></span>
               </div>
 
+              <!-- Hover SFTP button -->
+              <button
+                class="absolute left-2 bottom-2 flex items-center gap-1 px-2 py-1
+                       rounded-md bg-otter-surface/90 border border-otter-border
+                       text-otter-muted hover:text-otter-teal hover:border-otter-teal-dim
+                       opacity-0 group-hover:opacity-100 transition-all"
+                title="Open SFTP"
+                @click.stop="openSftpFromGrid(profile)"
+              >
+                <Icon icon="mdi:folder-network-outline" class="w-3 h-3" />
+                <span class="text-xs">SFTP</span>
+              </button>
+
               <!-- Hover edit button -->
               <button
                 class="absolute right-2 bottom-2 flex items-center gap-1 px-2 py-1
@@ -1478,7 +1563,7 @@ async function connectFromGrid(profile: ProfileSummary) {
       <template v-else>
         <!-- Split pane mode -->
         <div
-          v-show="currentView !== 'home' && currentView !== 'settings'"
+          v-show="isTerminalSession"
           ref="splitContainerRef"
           class="w-full h-full flex"
           :class="[
