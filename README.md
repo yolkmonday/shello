@@ -14,38 +14,45 @@
 
 > **Local-first.** Everything is stored locally on your machine — no cloud account, no telemetry.
 
-## Install (macOS)
+## Install
 
-### Via Homebrew
+Download the latest build for your OS from [Releases](https://github.com/yolkmonday/shello/releases).
 
-```sh
-brew tap yolkmonday/shello
-brew install --cask shello
-```
+> Builds are **not yet code-signed**, so each OS shows a first-launch warning. Steps to bypass are below — this is expected for unsigned apps and is safe.
 
-### Manual download
+### macOS
 
-Grab the latest `.dmg` from [Releases](https://github.com/yolkmonday/shello/releases), open it, and drag **Shello.app** into `/Applications`.
+Download the `.dmg`, open it, and drag **Shello.app** into `/Applications`.
 
-### First launch — Gatekeeper warning
+On first launch macOS may say *"Shello.app is damaged"* or *"cannot be opened because the developer cannot be verified"*:
 
-The current builds are **not yet code-signed or notarized**, so on first launch macOS will say *"Shello.app is damaged and can't be opened"* or *"cannot be opened because the developer cannot be verified"*. This is expected. To bypass it once:
+- **Right-click open:** Finder → `/Applications` → right-click **Shello.app** → **Open** → **Open** again. macOS remembers the choice afterward.
+- **Or clear quarantine:** `xattr -dr com.apple.quarantine /Applications/Shello.app`
 
-**Option A — right-click open:**
+### Windows
 
-1. Open Finder → `/Applications`.
-2. Right-click (or Control-click) **Shello.app** → **Open**.
-3. Click **Open** again in the dialog. macOS remembers the choice; subsequent launches work normally.
+Download the `.msi` (or `.exe`) and run it. SmartScreen may show *"Windows protected your PC"* — click **More info → Run anyway**.
 
-**Option B — remove the quarantine attribute** (if Option A doesn't work):
+### Linux
+
+Download the `.AppImage` (portable), `.deb` (Debian/Ubuntu), or `.rpm` (Fedora/RHEL):
 
 ```sh
-xattr -dr com.apple.quarantine /Applications/Shello.app
+# AppImage — portable, no install
+chmod +x Shello_*.AppImage && ./Shello_*.AppImage
+
+# Debian / Ubuntu
+sudo dpkg -i Shello_*.deb
+
+# Fedora / RHEL
+sudo rpm -i Shello_*.rpm
 ```
 
-Then double-click as usual.
+### Homebrew (planned)
 
-> Code-signing + notarization are on the roadmap and will remove this step entirely.
+A Homebrew cask is planned but not yet published.
+
+> Code-signing + notarization are on the roadmap and will remove the first-launch warnings.
 
 ## Development
 
