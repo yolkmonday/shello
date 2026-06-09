@@ -8,6 +8,7 @@ import { useProfilesStore } from "../stores/profiles";
 import type { ThemeName } from "../lib/themes";
 import LogoWordmark from "./LogoWordmark.vue";
 import { Icon } from "@iconify/vue";
+import { openUrl } from "@tauri-apps/plugin-opener";
 
 const emit = defineEmits<{
   "change-password": [];
@@ -57,6 +58,9 @@ const shortcuts = [
 ];
 
 const isDark = computed(() => terminalStore.appMode === "dark");
+
+const REPO_URL = "https://github.com/yolkmonday/shello";
+const ISSUES_URL = "https://github.com/yolkmonday/shello/issues/new";
 const showFontDropdown = ref(false);
 
 const importMessage = ref("");
@@ -182,8 +186,26 @@ async function importProfiles() {
         </button>
       </nav>
 
+      <!-- External links -->
+      <div class="px-2 pt-3 mt-3 border-t border-otter-border flex flex-col gap-0.5">
+        <button
+          class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-otter-muted hover:text-otter-text hover:bg-otter-surface/50 transition-colors"
+          @click="openUrl(ISSUES_URL)"
+        >
+          <Icon icon="mdi:bug-outline" class="w-4 h-4" />
+          <span>Report an issue</span>
+        </button>
+        <button
+          class="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-sm text-otter-muted hover:text-otter-text hover:bg-otter-surface/50 transition-colors"
+          @click="openUrl(REPO_URL)"
+        >
+          <Icon icon="mdi:github" class="w-4 h-4" />
+          <span>GitHub</span>
+        </button>
+      </div>
+
       <!-- Dark/Light toggle -->
-      <div class="px-3 pb-4 pt-3 border-t border-otter-border mt-3">
+      <div class="px-3 pb-4 pt-1">
         <button
           class="w-full flex items-center justify-between px-3 py-2 rounded-lg
                  hover:bg-otter-surface/50 transition-colors"
