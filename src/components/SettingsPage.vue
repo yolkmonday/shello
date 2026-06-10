@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, computed } from "vue";
+import { ref, computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { save, open } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
@@ -9,6 +9,8 @@ import type { ThemeName } from "../lib/themes";
 import LogoWordmark from "./LogoWordmark.vue";
 import { Icon } from "@iconify/vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { getVersion } from "@tauri-apps/api/app";
+import { useUpdaterStore } from "../stores/updater";
 
 const emit = defineEmits<{
   "change-password": [];
@@ -61,6 +63,24 @@ const isDark = computed(() => terminalStore.appMode === "dark");
 
 const REPO_URL = "https://github.com/yolkmonday/shello";
 const ISSUES_URL = "https://github.com/yolkmonday/shello/issues/new";
+
+const updaterStore = useUpdaterStore();
+const appVersion = ref("");
+onMounted(async () => {
+  try {
+    appVersion.value = await getVersion();
+  } catch {
+    appVersion.value = "";
+  }
+});
+
+const updaterStatusText = computed(() => {
+  if (updaterStore.checking) return "Checking…";
+  if (updaterStore.available) return `Version ${updaterStore.newVersion} available.`;
+  if (updaterStore.upToDate) return "You're on the latest version.";
+  if (updaterStore.error) return updaterStore.error;
+  return "Check GitHub for new releases.";
+});
 const showFontDropdown = ref(false);
 
 const importMessage = ref("");
@@ -659,9 +679,35 @@ async function importProfiles() {
           <div class="bg-otter-card border border-otter-border rounded-xl px-5 py-6">
             <div class="flex items-center gap-3">
               <LogoWordmark :height="28" />
-              <span class="text-xs text-otter-subtle font-mono ml-1">v0.1.0</span>
+              <span class="text-xs text-otter-subtle font-mono ml-1">v{{ appVersion || '—' }}</span>
             </div>
             <p class="text-xs text-otter-subtle mt-3">A modern SSH client built with Tauri.</p>
+          </div>
+
+          <!-- Software updates -->
+          <div class="bg-otter-card border border-otter-border rounded-xl px-5 py-4 flex items-center justify-between gap-3">
+            <div class="min-w-0">
+              <p class="text-sm text-otter-text">Software updates</p>
+              <p class="text-xs mt-0.5 truncate" :class="updaterStore.error ? 'text-red-400' : 'text-otter-subtle'">
+                {{ updaterStatusText }}
+              </p>
+            </div>
+            <button
+              v-if="updaterStore.available"
+              class="px-3 py-1.5 rounded-lg bg-otter-teal text-otter-dark text-xs font-medium hover:opacity-90 flex-shrink-0 disabled:opacity-60"
+              :disabled="updaterStore.downloading"
+              @click="updaterStore.install()"
+            >
+              {{ updaterStore.downloading ? 'Installing…' : 'Install &amp; restart' }}
+            </button>
+            <button
+              v-else
+              class="px-3 py-1.5 rounded-lg border border-otter-border text-otter-muted hover:text-otter-text hover:border-otter-subtle text-xs flex-shrink-0 disabled:opacity-60"
+              :disabled="updaterStore.checking"
+              @click="updaterStore.checkForUpdate(false)"
+            >
+              {{ updaterStore.checking ? 'Checking…' : 'Check for updates' }}
+            </button>
           </div>
         </div>
 

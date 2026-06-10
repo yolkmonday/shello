@@ -24,8 +24,17 @@
       "csp": "default-src 'self'; img-src 'self' asset: https://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost data: blob:; media-src 'self' data: blob:"
     }
   },
+  "plugins": {
+    "updater": {
+      "endpoints": [
+        "https://github.com/yolkmonday/shello/releases/latest/download/latest.json"
+      ],
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IENERDExQzE1NDExOTJBQTUKUldTbEtobEJGUnpSemVuempxMXNzNG9MRDlUNGI3NEFIeTZGY2JHTEc0MHpxbEFiRlRpdVNQQjMK"
+    }
+  },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": true,
     "targets": "all",
     "icon": [
       "icons/32x32.png",
