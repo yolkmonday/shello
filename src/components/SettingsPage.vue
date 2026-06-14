@@ -7,6 +7,7 @@ import { useTerminalStore } from "../stores/terminal";
 import { useProfilesStore } from "../stores/profiles";
 import type { ThemeName } from "../lib/themes";
 import LogoWordmark from "./LogoWordmark.vue";
+import ImportSshConfigDialog from "./ImportSshConfigDialog.vue";
 import { Icon } from "@iconify/vue";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { getVersion } from "@tauri-apps/api/app";
@@ -85,6 +86,16 @@ const showFontDropdown = ref(false);
 
 const importMessage = ref("");
 const importError = ref(false);
+
+const showSshImport = ref(false);
+async function onSshImported(count: number) {
+  await profilesStore.loadAll();
+  importError.value = false;
+  importMessage.value = count > 0 ? `Imported ${count} host(s) from SSH config` : "No hosts imported";
+  setTimeout(() => {
+    importMessage.value = "";
+  }, 4000);
+}
 
 async function forgetDevice() {
   try {
@@ -626,6 +637,20 @@ async function importProfiles() {
                 Import
               </button>
             </div>
+
+            <div class="px-5 py-4 flex items-center gap-3">
+              <div class="flex-1">
+                <p class="text-sm text-otter-text">Import from SSH config</p>
+                <p class="text-xs text-otter-subtle mt-0.5">Bring in hosts from your ~/.ssh/config file</p>
+              </div>
+              <button
+                class="px-3 py-1.5 rounded-lg bg-otter-surface border border-otter-border
+                       text-xs text-otter-text hover:border-otter-subtle transition-colors"
+                @click="showSshImport = true"
+              >
+                Import
+              </button>
+            </div>
           </div>
 
           <div v-if="importMessage">
@@ -713,5 +738,11 @@ async function importProfiles() {
 
       </div>
     </div>
+
+    <ImportSshConfigDialog
+      :open="showSshImport"
+      @close="showSshImport = false"
+      @imported="onSshImported"
+    />
   </div>
 </template>
