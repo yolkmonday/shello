@@ -5,6 +5,7 @@ import { listen, type UnlistenFn } from "@tauri-apps/api/event";
 import { useTerminalStore } from "../stores/terminal";
 import { type ProfileSummary, type Group } from "../stores/profiles";
 import { useProfilesStore } from "../stores/profiles";
+import { useTunnelsStore } from "../stores/tunnels";
 import TerminalView from "./TerminalView.vue";
 import ProfileEditor from "./ProfileEditor.vue";
 import GroupEditor from "./GroupEditor.vue";
@@ -16,6 +17,7 @@ import KeyManager from "./KeyManager.vue";
 import ScreenshotPreview from "./ScreenshotPreview.vue";
 import RecordingPreview from "./RecordingPreview.vue";
 import SftpView from "./sftp/SftpView.vue";
+import TunnelsPanel from "./TunnelsPanel.vue";
 import LogoIcon from "./LogoIcon.vue";
 import LogoWordmark from "./LogoWordmark.vue";
 import { Icon } from "@iconify/vue";
@@ -30,6 +32,9 @@ const profilesStore = useProfilesStore();
 const currentView = ref<string>("home");
 
 const sftpTitles = ref<Record<string, string>>({});
+
+const tunnelsStore = useTunnelsStore();
+const showTunnels = ref(false);
 
 // True only when a real terminal session is the active view (not home,
 // settings, or an SFTP view). Drives the session-specific top toolbar.
@@ -996,6 +1001,7 @@ async function connectFromGrid(profile: ProfileSummary) {
     currentView.value = sessionId;
     recordLastConnected(profile.id);
     detectOs(sessionId, profile.id);
+    tunnelsStore.autoStart(sessionId, profile.id);
   } catch (e) {
     const err = String(e);
     if (err.includes("vault_locked")) {
@@ -1192,6 +1198,15 @@ async function connectFromGrid(profile: ProfileSummary) {
         >
           <Icon icon="mdi:key-variant" class="w-4 h-4" />
         </button>
+        <!-- Port forwarding -->
+        <button
+          v-if="isTerminalSession"
+          class="flex items-center justify-center w-9 h-full transition-colors border-r border-otter-border text-otter-muted hover:text-otter-text"
+          title="Port forwarding"
+          @click="showTunnels = true"
+        >
+          <Icon icon="mdi:transit-connection-variant" class="w-4 h-4" />
+        </button>
         <!-- Log toggle -->
         <button
           v-if="isTerminalSession"
@@ -1255,6 +1270,12 @@ async function connectFromGrid(profile: ProfileSummary) {
         :title="sftpTitles[currentView.slice(5)]"
         class="absolute inset-0 z-10"
         @close="closeSftp(currentView.slice(5))"
+      />
+      <TunnelsPanel
+        v-if="isTerminalSession"
+        :open="showTunnels"
+        :session-id="currentView"
+        @close="showTunnels = false"
       />
       <!-- Connection loading overlay -->
       <Transition name="fade">

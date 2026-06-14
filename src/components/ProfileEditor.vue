@@ -3,6 +3,7 @@ import { ref, computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
 import { useProfilesStore, type ProfileSummary } from "../stores/profiles";
 import { useTerminalStore } from "../stores/terminal";
+import { useTunnelsStore, type Tunnel } from "../stores/tunnels";
 
 const props = defineProps<{
   profile?: ProfileSummary;
@@ -16,6 +17,45 @@ const emit = defineEmits<{
 }>();
 
 const profilesStore = useProfilesStore();
+const tunnelsStore = useTunnelsStore();
+
+const savedTunnels = computed<Tunnel[]>(() =>
+  props.profile ? tunnelsStore.saved[props.profile.id] ?? [] : [],
+);
+const newTun = ref<{ local_port: number | null; remote_host: string; remote_port: number | null }>({
+  local_port: null,
+  remote_host: "",
+  remote_port: null,
+});
+const tunnelError = ref("");
+
+async function addSavedTunnel() {
+  tunnelError.value = "";
+  if (!props.profile) return;
+  if (!newTun.value.local_port || !newTun.value.remote_host.trim() || !newTun.value.remote_port) {
+    tunnelError.value = "All tunnel fields are required";
+    return;
+  }
+  try {
+    await tunnelsStore.createSaved({
+      profile_id: props.profile.id,
+      local_port: newTun.value.local_port,
+      remote_host: newTun.value.remote_host.trim(),
+      remote_port: newTun.value.remote_port,
+    });
+    newTun.value = { local_port: null, remote_host: "", remote_port: null };
+  } catch (e) {
+    tunnelError.value = String(e);
+  }
+}
+
+async function removeSavedTunnel(id: string) {
+  if (props.profile) await tunnelsStore.removeSaved(props.profile.id, id);
+}
+
+async function toggleTunnelEnabled(t: Tunnel) {
+  if (props.profile) await tunnelsStore.updateSaved(props.profile.id, t.id, { enabled: !t.enabled });
+}
 const terminalStore = useTerminalStore();
 
 const name = ref("");
@@ -135,6 +175,7 @@ onMounted(() => {
     authType.value = props.profile.auth_type;
     groupId.value = props.profile.group_id;
     tags.value = props.profile.tags;
+    tunnelsStore.loadSaved(props.profile.id);
   } else if (props.prefill) {
     host.value = props.prefill.host;
     port.value = props.prefill.port;
@@ -512,6 +553,32 @@ async function saveAndConnect() {
                 placeholder="Tags (prod, nginx)"
                 @keyup.enter="saveAndConnect"
               />
+            </div>
+
+            <!-- Port forwarding (existing profiles only) -->
+            <div v-if="isEditing" class="flex flex-col gap-2 pt-1">
+              <label class="text-xs text-otter-muted">Port forwarding · auto-start on connect</label>
+              <div
+                v-for="t in savedTunnels"
+                :key="t.id"
+                class="flex items-center gap-2 px-3 py-2 rounded-lg bg-otter-surface/50 border border-otter-border"
+              >
+                <input type="checkbox" :checked="t.enabled" class="accent-otter-teal" @change="toggleTunnelEnabled(t)" />
+                <span class="text-xs font-mono text-otter-text flex-1 truncate">
+                  localhost:{{ t.local_port }} → {{ t.remote_host }}:{{ t.remote_port }}
+                </span>
+                <button type="button" class="text-otter-subtle hover:text-otter-coral text-sm leading-none px-1" @click="removeSavedTunnel(t.id)">✕</button>
+              </div>
+              <div class="flex items-center gap-1.5 text-xs font-mono">
+                <span class="text-otter-subtle">L:</span>
+                <input v-model.number="newTun.local_port" type="number" placeholder="5432" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                <span class="text-otter-subtle">→</span>
+                <input v-model="newTun.remote_host" placeholder="db.internal" class="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                <span class="text-otter-subtle">:</span>
+                <input v-model.number="newTun.remote_port" type="number" placeholder="5432" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                <button type="button" class="px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text hover:border-otter-teal-dim" @click="addSavedTunnel">Add</button>
+              </div>
+              <p v-if="tunnelError" class="text-[11px] text-otter-coral">{{ tunnelError }}</p>
             </div>
 
             <!-- Action buttons -->
