@@ -7,6 +7,7 @@ use super::client::SshClient;
 use super::pty::PtySession;
 use super::types::{ConnectionConfig, OsInfo, SessionInfo, parse_os_info};
 
+#[derive(Clone)]
 pub struct SessionManager {
     sessions: Arc<Mutex<HashMap<String, SshClient>>>,
     pty_sessions: Arc<Mutex<HashMap<String, PtySession>>>,
@@ -49,6 +50,27 @@ impl SessionManager {
             .request_subsystem(true, "sftp")
             .await
             .context("Failed to request sftp subsystem")?;
+        Ok(channel)
+    }
+
+    /// Open a direct-tcpip channel on an existing session, used for local
+    /// (`-L`) port forwarding. Briefly holds the sessions lock during the
+    /// channel open, like `open_pty`.
+    pub async fn open_direct_tcpip(
+        &self,
+        session_id: &str,
+        host: &str,
+        port: u16,
+    ) -> Result<russh::Channel<russh::client::Msg>> {
+        let sessions = self.sessions.lock().await;
+        let client = sessions
+            .get(session_id)
+            .context(format!("Session not found: {}", session_id))?;
+        let channel = client
+            .handle()
+            .channel_open_direct_tcpip(host.to_string(), port as u32, "127.0.0.1", 0u32)
+            .await
+            .context("Failed to open direct-tcpip channel")?;
         Ok(channel)
     }
 

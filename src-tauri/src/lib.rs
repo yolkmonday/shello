@@ -4,6 +4,7 @@ mod registry;
 mod vault;
 mod ssh;
 mod sftp;
+mod tunnel;
 
 use db::DbPool;
 use vault::VaultState;
@@ -42,8 +43,10 @@ async fn ssh_exec(
 #[tauri::command]
 async fn ssh_disconnect(
     state: tauri::State<'_, SessionManager>,
+    tunnels: tauri::State<'_, tunnel::TunnelManager>,
     session_id: String,
 ) -> Result<(), String> {
+    tunnels.stop_all(&session_id).await;
     state.disconnect(&session_id).await.map_err(|e| e.to_string())
 }
 
@@ -385,6 +388,7 @@ pub fn run() {
         })
         .manage(SessionManager::new())
         .manage(sftp::SftpManager::new())
+        .manage(tunnel::TunnelManager::new())
         .invoke_handler(tauri::generate_handler![
             greet,
             ssh_connect,
@@ -441,6 +445,13 @@ pub fn run() {
             sftp::sftp_cancel,
             sftp::sftp_close,
             ssh::config_import::ssh_config_parse,
+            tunnel::tunnel_list,
+            tunnel::tunnel_create,
+            tunnel::tunnel_update,
+            tunnel::tunnel_delete,
+            tunnel::tunnel_start,
+            tunnel::tunnel_stop,
+            tunnel::tunnel_active,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

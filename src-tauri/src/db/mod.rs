@@ -2,6 +2,7 @@ pub mod custom_recipes;
 pub mod profiles;
 pub mod registry;
 pub mod snippets;
+pub mod tunnels;
 
 use anyhow::Result;
 use sqlx::sqlite::SqlitePool;
