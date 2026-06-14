@@ -440,6 +440,7 @@ pub fn run() {
             sftp::sftp_upload,
             sftp::sftp_cancel,
             sftp::sftp_close,
+            ssh::config_import::ssh_config_parse,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
