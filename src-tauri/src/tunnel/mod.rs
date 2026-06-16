@@ -1,3 +1,5 @@
+mod socks5;
+
 use std::collections::HashMap;
 use std::sync::Arc;
 
@@ -26,6 +28,7 @@ pub enum TunnelStatus {
 pub struct ActiveTunnelInfo {
     pub tunnel_id: String,
     pub session_id: String,
+    pub tunnel_type: String,
     pub local_host: String,
     pub local_port: u16,
     pub remote_host: String,
@@ -37,10 +40,16 @@ pub struct ActiveTunnelInfo {
 #[derive(Debug, Clone, Deserialize)]
 pub struct StartTunnelConfig {
     pub tunnel_id: String,
+    #[serde(default = "default_tunnel_type")]
+    pub tunnel_type: String,
     pub local_host: String,
     pub local_port: u16,
     pub remote_host: String,
     pub remote_port: u16,
+}
+
+fn default_tunnel_type() -> String {
+    "local".to_string()
 }
 
 struct ActiveTunnel {
@@ -80,6 +89,7 @@ impl TunnelManager {
 
         let remote_host = cfg.remote_host.clone();
         let remote_port = cfg.remote_port;
+        let is_dynamic = cfg.tunnel_type == "dynamic";
         let sid = session_id.clone();
 
         let abort = tokio::spawn(async move {
@@ -90,12 +100,39 @@ impl TunnelManager {
                         let sid = sid.clone();
                         let rhost = remote_host.clone();
                         tokio::spawn(async move {
-                            match sessions.open_direct_tcpip(&sid, &rhost, remote_port).await {
-                                Ok(channel) => {
-                                    let mut stream = channel.into_stream();
-                                    let _ = tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+                            if is_dynamic {
+                                // SOCKS5: resolve the target from the handshake.
+                                let (host, port) = match socks5::handshake(&mut tcp).await {
+                                    Ok(t) => t,
+                                    Err(e) => {
+                                        log::warn!("socks5 handshake failed: {}", e);
+                                        return;
+                                    }
+                                };
+                                match sessions.open_direct_tcpip(&sid, &host, port).await {
+                                    Ok(channel) => {
+                                        if socks5::reply_success(&mut tcp).await.is_err() {
+                                            return;
+                                        }
+                                        let mut stream = channel.into_stream();
+                                        let _ =
+                                            tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+                                    }
+                                    Err(e) => {
+                                        log::warn!("socks5 target failed: {}", e);
+                                        let _ = socks5::reply_failure(&mut tcp).await;
+                                    }
                                 }
-                                Err(e) => log::warn!("tunnel direct-tcpip failed: {}", e),
+                            } else {
+                                // Local forward: fixed remote target.
+                                match sessions.open_direct_tcpip(&sid, &rhost, remote_port).await {
+                                    Ok(channel) => {
+                                        let mut stream = channel.into_stream();
+                                        let _ =
+                                            tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+                                    }
+                                    Err(e) => log::warn!("tunnel direct-tcpip failed: {}", e),
+                                }
                             }
                         });
                     }
@@ -110,6 +147,7 @@ impl TunnelManager {
         let info = ActiveTunnelInfo {
             tunnel_id: cfg.tunnel_id.clone(),
             session_id: session_id.clone(),
+            tunnel_type: cfg.tunnel_type,
             local_host: cfg.local_host,
             local_port: cfg.local_port,
             remote_host: cfg.remote_host,

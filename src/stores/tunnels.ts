@@ -21,6 +21,7 @@ export type ActiveStatus = "starting" | "active" | "error" | "stopped";
 export interface ActiveTunnel {
   tunnel_id: string;
   session_id: string;
+  tunnel_type: string;
   local_host: string;
   local_port: number;
   remote_host: string;
@@ -31,6 +32,7 @@ export interface ActiveTunnel {
 
 export interface TunnelConfig {
   tunnel_id: string;
+  tunnel_type: string;
   local_host: string;
   local_port: number;
   remote_host: string;
@@ -59,6 +61,7 @@ export const useTunnelsStore = defineStore("tunnels", () => {
         const entry: ActiveTunnel = {
           tunnel_id: info.tunnel_id,
           session_id: sid,
+          tunnel_type: info.tunnel_type,
           local_host: info.local_host,
           local_port: info.local_port,
           remote_host: info.remote_host,
@@ -80,6 +83,7 @@ export const useTunnelsStore = defineStore("tunnels", () => {
 
   async function createSaved(input: {
     profile_id: string;
+    tunnel_type?: string;
     local_host?: string;
     local_port: number;
     remote_host: string;
@@ -144,6 +148,7 @@ export const useTunnelsStore = defineStore("tunnels", () => {
     for (const t of (saved.value[profileId] ?? []).filter((x) => x.enabled)) {
       await start(sessionId, {
         tunnel_id: t.id,
+        tunnel_type: t.tunnel_type,
         local_host: t.local_host,
         local_port: t.local_port,
         remote_host: t.remote_host,

@@ -21,6 +21,7 @@ pub struct Tunnel {
 #[derive(Debug, Deserialize)]
 pub struct CreateTunnelInput {
     pub profile_id: String,
+    pub tunnel_type: Option<String>,
     pub local_host: Option<String>,
     pub local_port: i64,
     pub remote_host: String,
@@ -37,10 +38,19 @@ pub struct UpdateTunnelInput {
     pub enabled: Option<bool>,
 }
 
-/// Validate a tunnel's ports and remote host. Used by create/update.
-pub fn validate_tunnel(local_port: i64, remote_port: i64, remote_host: &str) -> Result<()> {
+/// Validate a tunnel. Dynamic (SOCKS5) tunnels only need a valid local port;
+/// local forwards also need a remote host and port.
+pub fn validate_tunnel(
+    tunnel_type: &str,
+    local_port: i64,
+    remote_port: i64,
+    remote_host: &str,
+) -> Result<()> {
     if !(1..=65535).contains(&local_port) {
         bail!("Local port must be between 1 and 65535");
+    }
+    if tunnel_type == "dynamic" {
+        return Ok(());
     }
     if !(1..=65535).contains(&remote_port) {
         bail!("Remote port must be between 1 and 65535");
@@ -81,7 +91,8 @@ pub async fn get_tunnel(pool: &DbPool, id: &str) -> Result<Tunnel> {
 }
 
 pub async fn create_tunnel(pool: &DbPool, input: CreateTunnelInput) -> Result<Tunnel> {
-    validate_tunnel(input.local_port, input.remote_port, &input.remote_host)?;
+    let tunnel_type = input.tunnel_type.unwrap_or_else(|| "local".to_string());
+    validate_tunnel(&tunnel_type, input.local_port, input.remote_port, &input.remote_host)?;
     let id = ulid::Ulid::new().to_string();
     let now = chrono::Utc::now().to_rfc3339();
     let local_host = input.local_host.unwrap_or_else(|| "127.0.0.1".to_string());
@@ -89,10 +100,11 @@ pub async fn create_tunnel(pool: &DbPool, input: CreateTunnelInput) -> Result<Tu
 
     sqlx::query(
         "INSERT INTO tunnels (id, profile_id, tunnel_type, local_host, local_port, remote_host, remote_port, enabled, created_at, updated_at)
-         VALUES (?, ?, 'local', ?, ?, ?, ?, ?, ?, ?)",
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&id)
     .bind(&input.profile_id)
+    .bind(&tunnel_type)
     .bind(&local_host)
     .bind(input.local_port)
     .bind(&input.remote_host)
@@ -113,7 +125,7 @@ pub async fn update_tunnel(pool: &DbPool, id: &str, input: UpdateTunnelInput) ->
     let remote_host = input.remote_host.unwrap_or(existing.remote_host);
     let remote_port = input.remote_port.unwrap_or(existing.remote_port);
     let enabled = input.enabled.unwrap_or(existing.enabled);
-    validate_tunnel(local_port, remote_port, &remote_host)?;
+    validate_tunnel(&existing.tunnel_type, local_port, remote_port, &remote_host)?;
     let now = chrono::Utc::now().to_rfc3339();
 
     sqlx::query(
@@ -145,23 +157,29 @@ mod tests {
     use super::*;
 
     #[test]
-    fn valid_tunnel_ok() {
-        assert!(validate_tunnel(5432, 5432, "db.internal").is_ok());
+    fn valid_local_tunnel_ok() {
+        assert!(validate_tunnel("local", 5432, 5432, "db.internal").is_ok());
+    }
+
+    #[test]
+    fn dynamic_only_needs_local_port() {
+        assert!(validate_tunnel("dynamic", 1080, 0, "").is_ok());
+        assert!(validate_tunnel("dynamic", 0, 0, "").is_err());
     }
 
     #[test]
     fn rejects_bad_local_port() {
-        assert!(validate_tunnel(0, 80, "h").is_err());
-        assert!(validate_tunnel(70000, 80, "h").is_err());
+        assert!(validate_tunnel("local", 0, 80, "h").is_err());
+        assert!(validate_tunnel("local", 70000, 80, "h").is_err());
     }
 
     #[test]
     fn rejects_bad_remote_port() {
-        assert!(validate_tunnel(80, 0, "h").is_err());
+        assert!(validate_tunnel("local", 80, 0, "h").is_err());
     }
 
     #[test]
     fn rejects_empty_remote_host() {
-        assert!(validate_tunnel(80, 80, "   ").is_err());
+        assert!(validate_tunnel("local", 80, 80, "   ").is_err());
     }
 }

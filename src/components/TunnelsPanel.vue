@@ -11,6 +11,7 @@ const store = useTunnelsStore();
 const tunnels = computed<ActiveTunnel[]>(() => store.active[props.sessionId] ?? []);
 
 const adding = ref(false);
+const tunnelType = ref<"local" | "dynamic">("local");
 const localPort = ref<number | null>(null);
 const remoteHost = ref("");
 const remotePort = ref<number | null>(null);
@@ -32,16 +33,18 @@ function statusColor(s: ActiveTunnel["status"]): string {
 
 async function addTunnel() {
   formError.value = "";
-  if (!localPort.value || !remoteHost.value.trim() || !remotePort.value) {
-    formError.value = "All fields are required";
+  const isDynamic = tunnelType.value === "dynamic";
+  if (!localPort.value || (!isDynamic && (!remoteHost.value.trim() || !remotePort.value))) {
+    formError.value = isDynamic ? "Local port is required" : "All fields are required";
     return;
   }
   await store.start(props.sessionId, {
     tunnel_id: crypto.randomUUID(),
+    tunnel_type: tunnelType.value,
     local_host: "127.0.0.1",
     local_port: localPort.value,
-    remote_host: remoteHost.value.trim(),
-    remote_port: remotePort.value,
+    remote_host: isDynamic ? "" : remoteHost.value.trim(),
+    remote_port: isDynamic ? 0 : remotePort.value!,
   });
   localPort.value = null;
   remoteHost.value = "";
@@ -79,7 +82,8 @@ async function addTunnel() {
           <span class="w-2 h-2 rounded-full flex-shrink-0" :class="statusColor(t.status)"></span>
           <div class="min-w-0 flex-1">
             <p class="text-sm text-otter-text font-mono truncate">
-              localhost:{{ t.local_port }} → {{ t.remote_host }}:{{ t.remote_port }}
+              <template v-if="t.tunnel_type === 'dynamic'">SOCKS5 localhost:{{ t.local_port }}</template>
+              <template v-else>localhost:{{ t.local_port }} → {{ t.remote_host }}:{{ t.remote_port }}</template>
             </p>
             <p v-if="t.status === 'error'" class="text-[11px] text-red-400 truncate" :title="t.error">{{ t.error }}</p>
             <p v-else class="text-[11px] text-otter-subtle capitalize">{{ t.status }}</p>
@@ -112,13 +116,28 @@ async function addTunnel() {
           <Icon icon="mdi:plus" class="w-4 h-4" /> Add tunnel
         </button>
         <div v-else class="flex flex-col gap-2">
+          <!-- Tunnel type -->
+          <div class="flex items-center gap-1 text-xs">
+            <button
+              class="px-2 py-1 rounded"
+              :class="tunnelType === 'local' ? 'bg-otter-teal text-otter-dark' : 'text-otter-muted hover:bg-otter-surface'"
+              @click="tunnelType = 'local'"
+            >Local</button>
+            <button
+              class="px-2 py-1 rounded"
+              :class="tunnelType === 'dynamic' ? 'bg-otter-teal text-otter-dark' : 'text-otter-muted hover:bg-otter-surface'"
+              @click="tunnelType = 'dynamic'"
+            >Dynamic (SOCKS5)</button>
+          </div>
           <div class="flex items-center gap-2 text-xs text-otter-muted font-mono">
             <span>localhost:</span>
             <input v-model.number="localPort" type="number" placeholder="5432" class="w-20 bg-otter-dark border border-otter-border rounded px-2 py-1 text-otter-text focus:outline-none focus:border-otter-teal-dim" />
-            <span>→</span>
-            <input v-model="remoteHost" placeholder="db.internal" class="flex-1 bg-otter-dark border border-otter-border rounded px-2 py-1 text-otter-text focus:outline-none focus:border-otter-teal-dim" />
-            <span>:</span>
-            <input v-model.number="remotePort" type="number" placeholder="5432" class="w-20 bg-otter-dark border border-otter-border rounded px-2 py-1 text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+            <template v-if="tunnelType === 'local'">
+              <span>→</span>
+              <input v-model="remoteHost" placeholder="db.internal" class="flex-1 bg-otter-dark border border-otter-border rounded px-2 py-1 text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+              <span>:</span>
+              <input v-model.number="remotePort" type="number" placeholder="5432" class="w-20 bg-otter-dark border border-otter-border rounded px-2 py-1 text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+            </template>
           </div>
           <p v-if="formError" class="text-[11px] text-red-400">{{ formError }}</p>
           <div class="flex items-center gap-2">
