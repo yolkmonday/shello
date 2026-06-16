@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useProfilesStore, type Group } from "../stores/profiles";
 import {
   useProfileForm,
@@ -75,6 +76,15 @@ function resetGroupForm() {
   newGroupName.value = "";
   newGroupColor.value = "#475569";
   creatingGroup.value = false;
+}
+
+async function browseKeyFile() {
+  const selected = await open({
+    title: "Select SSH Key",
+    multiple: false,
+    filters: [{ name: "SSH Keys", extensions: ["pem", "key", "pub", ""] }],
+  });
+  if (selected) form.keyPath.value = selected;
 }
 </script>
 
@@ -172,13 +182,24 @@ function resetGroupForm() {
 
           <!-- Key fields -->
           <template v-if="form.authType.value === 'key'">
-            <input
-              v-model="form.keyPath.value"
-              class="px-3 py-2 rounded-lg bg-otter-surface border border-otter-border
-                     text-otter-text placeholder-otter-subtle text-sm
-                     focus:outline-none focus:border-otter-teal-dim transition-colors"
-              placeholder="Path to private key (~/.ssh/id_ed25519)"
-            />
+            <div class="flex gap-2">
+              <input
+                v-model="form.keyPath.value"
+                class="flex-1 px-3 py-2 rounded-lg bg-otter-surface border border-otter-border
+                       text-otter-text placeholder-otter-subtle text-sm
+                       focus:outline-none focus:border-otter-teal-dim transition-colors"
+                placeholder="Path to private key (~/.ssh/id_ed25519)"
+              />
+              <button
+                type="button"
+                class="px-3 py-2 rounded-lg bg-otter-surface border border-otter-border
+                       text-otter-muted text-xs hover:text-otter-text hover:border-otter-teal-dim
+                       transition-colors flex-shrink-0"
+                @click="browseKeyFile"
+              >
+                Browse
+              </button>
+            </div>
             <input
               v-model="form.passphrase.value"
               type="password"

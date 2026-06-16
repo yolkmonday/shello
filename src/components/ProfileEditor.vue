@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed } from "vue";
+import { open } from "@tauri-apps/plugin-dialog";
 import { useProfilesStore, type ProfileSummary, type Group } from "../stores/profiles";
 import { useTunnelsStore, type Tunnel } from "../stores/tunnels";
 import {
@@ -152,6 +153,15 @@ async function createGroupInline() {
   }
 }
 
+async function browseKeyFile() {
+  const selected = await open({
+    title: "Select SSH Key",
+    multiple: false,
+    filters: [{ name: "SSH Keys", extensions: ["pem", "key", "pub", ""] }],
+  });
+  if (selected) form.keyPath.value = selected;
+}
+
 function startEditGroup(group: { id: string; name: string; color: string }) {
   editingGroupId.value = group.id;
   newGroupName.value = group.name;
@@ -294,13 +304,24 @@ function resetGroupForm() {
                 />
 
                 <template v-if="form.authType.value === 'key'">
-                  <input
-                    v-model="form.keyPath.value"
-                    class="px-3 py-2 rounded-lg bg-otter-surface border border-otter-border
-                           text-otter-text placeholder-otter-subtle text-sm
-                           focus:outline-none focus:border-otter-teal-dim transition-colors"
-                    placeholder="Path to private key (~/.ssh/id_ed25519)"
-                  />
+                  <div class="flex gap-2">
+                    <input
+                      v-model="form.keyPath.value"
+                      class="flex-1 px-3 py-2 rounded-lg bg-otter-surface border border-otter-border
+                             text-otter-text placeholder-otter-subtle text-sm
+                             focus:outline-none focus:border-otter-teal-dim transition-colors"
+                      placeholder="Path to private key (~/.ssh/id_ed25519)"
+                    />
+                    <button
+                      type="button"
+                      class="px-3 py-2 rounded-lg bg-otter-surface border border-otter-border
+                             text-otter-muted text-xs hover:text-otter-text hover:border-otter-teal-dim
+                             transition-colors flex-shrink-0"
+                      @click="browseKeyFile"
+                    >
+                      Browse
+                    </button>
+                  </div>
                   <input
                     v-model="form.passphrase.value"
                     type="password"
