@@ -74,6 +74,44 @@ impl SessionManager {
         Ok(channel)
     }
 
+    /// Request a remote (`-R`) forward: ask the server to bind `remote_port`,
+    /// routing incoming connections to `local_host:local_port` on this machine.
+    pub async fn add_remote_forward(
+        &self,
+        session_id: &str,
+        remote_port: u16,
+        local_host: String,
+        local_port: u16,
+    ) -> Result<()> {
+        let sessions = self.sessions.lock().await;
+        let client = sessions
+            .get(session_id)
+            .context(format!("Session not found: {}", session_id))?;
+        client
+            .forwards()
+            .lock()
+            .await
+            .insert(remote_port, (local_host, local_port));
+        client
+            .handle()
+            .tcpip_forward("", remote_port as u32)
+            .await
+            .map_err(|e| anyhow::anyhow!("Failed to request remote forward: {}", e))?;
+        Ok(())
+    }
+
+    /// Cancel a remote (`-R`) forward. Best-effort.
+    pub async fn remove_remote_forward(&self, session_id: &str, remote_port: u16) {
+        let sessions = self.sessions.lock().await;
+        if let Some(client) = sessions.get(session_id) {
+            let _ = client
+                .handle()
+                .cancel_tcpip_forward("", remote_port as u32)
+                .await;
+            client.forwards().lock().await.remove(&remote_port);
+        }
+    }
+
     /// Open a PTY on an existing session.
     /// Note: russh Handle does NOT implement Clone, so we hold the
     /// sessions lock during PTY open. This blocks other session

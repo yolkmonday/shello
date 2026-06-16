@@ -23,7 +23,7 @@ const savedTunnels = computed<Tunnel[]>(() =>
   props.profile ? tunnelsStore.saved[props.profile.id] ?? [] : [],
 );
 const newTun = ref<{
-  tunnel_type: "local" | "dynamic";
+  tunnel_type: "local" | "dynamic" | "remote";
   local_port: number | null;
   remote_host: string;
   remote_port: number | null;
@@ -38,18 +38,28 @@ const tunnelError = ref("");
 async function addSavedTunnel() {
   tunnelError.value = "";
   if (!props.profile) return;
-  const isDynamic = newTun.value.tunnel_type === "dynamic";
-  if (!newTun.value.local_port || (!isDynamic && (!newTun.value.remote_host.trim() || !newTun.value.remote_port))) {
-    tunnelError.value = isDynamic ? "Local port is required" : "All tunnel fields are required";
+  const type = newTun.value.tunnel_type;
+  if (type === "dynamic") {
+    if (!newTun.value.local_port) {
+      tunnelError.value = "Local port is required";
+      return;
+    }
+  } else if (type === "remote") {
+    if (!newTun.value.remote_port || !newTun.value.local_port) {
+      tunnelError.value = "Server port and local target port are required";
+      return;
+    }
+  } else if (!newTun.value.local_port || !newTun.value.remote_host.trim() || !newTun.value.remote_port) {
+    tunnelError.value = "All tunnel fields are required";
     return;
   }
   try {
     await tunnelsStore.createSaved({
       profile_id: props.profile.id,
-      tunnel_type: newTun.value.tunnel_type,
-      local_port: newTun.value.local_port,
-      remote_host: isDynamic ? "" : newTun.value.remote_host.trim(),
-      remote_port: isDynamic ? 0 : newTun.value.remote_port!,
+      tunnel_type: type,
+      local_port: newTun.value.local_port!,
+      remote_host: type === "local" ? newTun.value.remote_host.trim() : "",
+      remote_port: type === "dynamic" ? 0 : newTun.value.remote_port!,
     });
     newTun.value = { tunnel_type: "local", local_port: null, remote_host: "", remote_port: null };
   } catch (e) {
@@ -574,34 +584,39 @@ async function saveAndConnect() {
                 <input type="checkbox" :checked="t.enabled" class="accent-otter-teal" @change="toggleTunnelEnabled(t)" />
                 <span class="text-xs font-mono text-otter-text flex-1 truncate">
                   <template v-if="t.tunnel_type === 'dynamic'">SOCKS5 localhost:{{ t.local_port }}</template>
+                  <template v-else-if="t.tunnel_type === 'remote'">remote:{{ t.remote_port }} → localhost:{{ t.local_port }}</template>
                   <template v-else>localhost:{{ t.local_port }} → {{ t.remote_host }}:{{ t.remote_port }}</template>
                 </span>
                 <button type="button" class="text-otter-subtle hover:text-otter-coral text-sm leading-none px-1" @click="removeSavedTunnel(t.id)">✕</button>
               </div>
               <div class="flex items-center gap-1 text-xs">
                 <button
+                  v-for="ty in (['local', 'dynamic', 'remote'] as const)"
+                  :key="ty"
                   type="button"
-                  class="px-2 py-1 rounded"
-                  :class="newTun.tunnel_type === 'local' ? 'bg-otter-teal text-otter-dark' : 'text-otter-muted hover:bg-otter-surface'"
-                  @click="newTun.tunnel_type = 'local'"
-                >Local</button>
-                <button
-                  type="button"
-                  class="px-2 py-1 rounded"
-                  :class="newTun.tunnel_type === 'dynamic' ? 'bg-otter-teal text-otter-dark' : 'text-otter-muted hover:bg-otter-surface'"
-                  @click="newTun.tunnel_type = 'dynamic'"
-                >Dynamic</button>
+                  class="px-2 py-1 rounded capitalize"
+                  :class="newTun.tunnel_type === ty ? 'bg-otter-teal text-otter-dark' : 'text-otter-muted hover:bg-otter-surface'"
+                  @click="newTun.tunnel_type = ty"
+                >{{ ty }}</button>
               </div>
               <div class="flex items-center gap-1.5 text-xs font-mono">
-                <span class="text-otter-subtle">L:</span>
-                <input v-model.number="newTun.local_port" type="number" placeholder="5432" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
-                <template v-if="newTun.tunnel_type === 'local'">
-                  <span class="text-otter-subtle">→</span>
-                  <input v-model="newTun.remote_host" placeholder="db.internal" class="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
-                  <span class="text-otter-subtle">:</span>
-                  <input v-model.number="newTun.remote_port" type="number" placeholder="5432" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                <template v-if="newTun.tunnel_type === 'remote'">
+                  <span class="text-otter-subtle">R:</span>
+                  <input v-model.number="newTun.remote_port" type="number" placeholder="3000" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                  <span class="text-otter-subtle">→ L:</span>
+                  <input v-model.number="newTun.local_port" type="number" placeholder="3000" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
                 </template>
-                <span v-else class="flex-1 text-otter-subtle">SOCKS5 proxy</span>
+                <template v-else>
+                  <span class="text-otter-subtle">L:</span>
+                  <input v-model.number="newTun.local_port" type="number" placeholder="5432" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                  <template v-if="newTun.tunnel_type === 'local'">
+                    <span class="text-otter-subtle">→</span>
+                    <input v-model="newTun.remote_host" placeholder="db.internal" class="flex-1 min-w-0 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                    <span class="text-otter-subtle">:</span>
+                    <input v-model.number="newTun.remote_port" type="number" placeholder="5432" class="w-16 px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text focus:outline-none focus:border-otter-teal-dim" />
+                  </template>
+                  <span v-else class="flex-1 text-otter-subtle">SOCKS5 proxy</span>
+                </template>
                 <button type="button" class="px-2 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-otter-text hover:border-otter-teal-dim" @click="addSavedTunnel">Add</button>
               </div>
               <p v-if="tunnelError" class="text-[11px] text-otter-coral">{{ tunnelError }}</p>

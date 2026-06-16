@@ -1,16 +1,25 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 use anyhow::{Context, Result};
 use russh::client;
 use russh::keys::key::PrivateKeyWithHashAlg;
 use russh::ChannelMsg;
 use log::warn;
+use tokio::io::copy_bidirectional;
+use tokio::net::TcpStream;
+use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
 use super::types::{AuthMethod, ConnectionConfig};
 
+/// Remote-forward routing table: server bind port → local target (host, port).
+pub(crate) type Forwards = Arc<Mutex<HashMap<u16, (String, u16)>>>;
+
 // ── SSH Event Handler ────────────────────────────────────────────────
 
-pub(crate) struct SshHandler;
+pub(crate) struct SshHandler {
+    forwards: Forwards,
+}
 
 impl client::Handler for SshHandler {
     type Error = anyhow::Error;
@@ -22,12 +31,44 @@ impl client::Handler for SshHandler {
         warn!("Accepting server key (TOFU)");
         Ok(true)
     }
+
+    /// A connection arrived on a server-side `-R` forward. Route it to the
+    /// configured local target.
+    async fn server_channel_open_forwarded_tcpip(
+        &mut self,
+        channel: russh::Channel<russh::client::Msg>,
+        _connected_address: &str,
+        connected_port: u32,
+        _originator_address: &str,
+        _originator_port: u32,
+        _session: &mut client::Session,
+    ) -> Result<(), Self::Error> {
+        let target = self.forwards.lock().await.get(&(connected_port as u16)).cloned();
+        match target {
+            Some((host, port)) => {
+                tokio::spawn(async move {
+                    match TcpStream::connect((host.as_str(), port)).await {
+                        Ok(mut tcp) => {
+                            let mut stream = channel.into_stream();
+                            let _ = copy_bidirectional(&mut tcp, &mut stream).await;
+                        }
+                        Err(e) => {
+                            log::warn!("remote-forward: connect {}:{} failed: {}", host, port, e)
+                        }
+                    }
+                });
+            }
+            None => log::warn!("remote-forward: no route for port {}", connected_port),
+        }
+        Ok(())
+    }
 }
 
 // ── SSH Client ───────────────────────────────────────────────────────
 
 pub struct SshClient {
     handle: client::Handle<SshHandler>,
+    forwards: Forwards,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -41,7 +82,10 @@ impl SshClient {
             ..Default::default()
         });
 
-        let handler = SshHandler;
+        let forwards: Forwards = Arc::new(Mutex::new(HashMap::new()));
+        let handler = SshHandler {
+            forwards: forwards.clone(),
+        };
         let timeout_secs = config.timeout_secs;
         let mut handle = timeout(
             Duration::from_secs(timeout_secs),
@@ -87,6 +131,7 @@ impl SshClient {
 
         Ok(Self {
             handle,
+            forwards,
             host: config.host,
             port: config.port,
             username: config.username,
@@ -96,6 +141,11 @@ impl SshClient {
 
     pub fn handle(&self) -> &client::Handle<SshHandler> {
         &self.handle
+    }
+
+    /// The remote-forward routing table, shared with the SSH event handler.
+    pub fn forwards(&self) -> Forwards {
+        self.forwards.clone()
     }
 
     pub async fn exec(&mut self, command: &str) -> Result<String> {

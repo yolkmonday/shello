@@ -55,6 +55,10 @@ pub fn validate_tunnel(
     if !(1..=65535).contains(&remote_port) {
         bail!("Remote port must be between 1 and 65535");
     }
+    // Remote (-R) forwards target a local host:port; no remote host needed.
+    if tunnel_type == "remote" {
+        return Ok(());
+    }
     if remote_host.trim().is_empty() {
         bail!("Remote host is required");
     }
@@ -165,6 +169,12 @@ mod tests {
     fn dynamic_only_needs_local_port() {
         assert!(validate_tunnel("dynamic", 1080, 0, "").is_ok());
         assert!(validate_tunnel("dynamic", 0, 0, "").is_err());
+    }
+
+    #[test]
+    fn remote_needs_both_ports_not_host() {
+        assert!(validate_tunnel("remote", 3000, 8080, "").is_ok());
+        assert!(validate_tunnel("remote", 3000, 0, "").is_err());
     }
 
     #[test]

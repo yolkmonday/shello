@@ -53,7 +53,10 @@ fn default_tunnel_type() -> String {
 }
 
 struct ActiveTunnel {
-    abort: JoinHandle<()>,
+    /// Listener task for local/dynamic tunnels; None for remote forwards.
+    abort: Option<JoinHandle<()>>,
+    /// Set for remote (`-R`) tunnels, used to cancel the forward on stop.
+    remote_port: Option<u16>,
     info: ActiveTunnelInfo,
 }
 
@@ -82,67 +85,96 @@ impl TunnelManager {
     ) -> Result<()> {
         let k = key(&session_id, &cfg.tunnel_id);
 
-        // Bind first so a port conflict surfaces synchronously to the caller.
-        let listener = TcpListener::bind((cfg.local_host.as_str(), cfg.local_port))
-            .await
-            .map_err(|e| anyhow!("Failed to bind {}:{}: {}", cfg.local_host, cfg.local_port, e))?;
+        let (abort, remote_port_field): (Option<JoinHandle<()>>, Option<u16>) =
+            if cfg.tunnel_type == "remote" {
+                // Server binds the port; the SSH handler routes connections back
+                // to the local target. No local listener.
+                sessions
+                    .add_remote_forward(
+                        &session_id,
+                        cfg.remote_port,
+                        cfg.local_host.clone(),
+                        cfg.local_port,
+                    )
+                    .await?;
+                (None, Some(cfg.remote_port))
+            } else {
+                // Bind first so a port conflict surfaces synchronously.
+                let listener = TcpListener::bind((cfg.local_host.as_str(), cfg.local_port))
+                    .await
+                    .map_err(|e| {
+                        anyhow!("Failed to bind {}:{}: {}", cfg.local_host, cfg.local_port, e)
+                    })?;
 
-        let remote_host = cfg.remote_host.clone();
-        let remote_port = cfg.remote_port;
-        let is_dynamic = cfg.tunnel_type == "dynamic";
-        let sid = session_id.clone();
+                let remote_host = cfg.remote_host.clone();
+                let remote_port = cfg.remote_port;
+                let is_dynamic = cfg.tunnel_type == "dynamic";
+                let sid = session_id.clone();
 
-        let abort = tokio::spawn(async move {
-            loop {
-                match listener.accept().await {
-                    Ok((mut tcp, _addr)) => {
-                        let sessions = sessions.clone();
-                        let sid = sid.clone();
-                        let rhost = remote_host.clone();
-                        tokio::spawn(async move {
-                            if is_dynamic {
-                                // SOCKS5: resolve the target from the handshake.
-                                let (host, port) = match socks5::handshake(&mut tcp).await {
-                                    Ok(t) => t,
-                                    Err(e) => {
-                                        log::warn!("socks5 handshake failed: {}", e);
-                                        return;
-                                    }
-                                };
-                                match sessions.open_direct_tcpip(&sid, &host, port).await {
-                                    Ok(channel) => {
-                                        if socks5::reply_success(&mut tcp).await.is_err() {
-                                            return;
+                let handle = tokio::spawn(async move {
+                    loop {
+                        match listener.accept().await {
+                            Ok((mut tcp, _addr)) => {
+                                let sessions = sessions.clone();
+                                let sid = sid.clone();
+                                let rhost = remote_host.clone();
+                                tokio::spawn(async move {
+                                    if is_dynamic {
+                                        // SOCKS5: resolve the target from the handshake.
+                                        let (host, port) = match socks5::handshake(&mut tcp).await {
+                                            Ok(t) => t,
+                                            Err(e) => {
+                                                log::warn!("socks5 handshake failed: {}", e);
+                                                return;
+                                            }
+                                        };
+                                        match sessions.open_direct_tcpip(&sid, &host, port).await {
+                                            Ok(channel) => {
+                                                if socks5::reply_success(&mut tcp).await.is_err() {
+                                                    return;
+                                                }
+                                                let mut stream = channel.into_stream();
+                                                let _ = tokio::io::copy_bidirectional(
+                                                    &mut tcp,
+                                                    &mut stream,
+                                                )
+                                                .await;
+                                            }
+                                            Err(e) => {
+                                                log::warn!("socks5 target failed: {}", e);
+                                                let _ = socks5::reply_failure(&mut tcp).await;
+                                            }
                                         }
-                                        let mut stream = channel.into_stream();
-                                        let _ =
-                                            tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
+                                    } else {
+                                        // Local forward: fixed remote target.
+                                        match sessions
+                                            .open_direct_tcpip(&sid, &rhost, remote_port)
+                                            .await
+                                        {
+                                            Ok(channel) => {
+                                                let mut stream = channel.into_stream();
+                                                let _ = tokio::io::copy_bidirectional(
+                                                    &mut tcp,
+                                                    &mut stream,
+                                                )
+                                                .await;
+                                            }
+                                            Err(e) => {
+                                                log::warn!("tunnel direct-tcpip failed: {}", e)
+                                            }
+                                        }
                                     }
-                                    Err(e) => {
-                                        log::warn!("socks5 target failed: {}", e);
-                                        let _ = socks5::reply_failure(&mut tcp).await;
-                                    }
-                                }
-                            } else {
-                                // Local forward: fixed remote target.
-                                match sessions.open_direct_tcpip(&sid, &rhost, remote_port).await {
-                                    Ok(channel) => {
-                                        let mut stream = channel.into_stream();
-                                        let _ =
-                                            tokio::io::copy_bidirectional(&mut tcp, &mut stream).await;
-                                    }
-                                    Err(e) => log::warn!("tunnel direct-tcpip failed: {}", e),
-                                }
+                                });
                             }
-                        });
+                            Err(e) => {
+                                log::warn!("tunnel accept error: {}", e);
+                                break;
+                            }
+                        }
                     }
-                    Err(e) => {
-                        log::warn!("tunnel accept error: {}", e);
-                        break;
-                    }
-                }
-            }
-        });
+                });
+                (Some(handle), None)
+            };
 
         let info = ActiveTunnelInfo {
             tunnel_id: cfg.tunnel_id.clone(),
@@ -155,14 +187,32 @@ impl TunnelManager {
             status: TunnelStatus::Active,
         };
         emit_status(&app, &k, &info);
-        self.active.lock().await.insert(k, ActiveTunnel { abort, info });
+        self.active.lock().await.insert(
+            k,
+            ActiveTunnel {
+                abort,
+                remote_port: remote_port_field,
+                info,
+            },
+        );
         Ok(())
     }
 
-    pub async fn stop(&self, session_id: &str, tunnel_id: &str, app: &AppHandle) {
+    pub async fn stop(
+        &self,
+        session_id: &str,
+        tunnel_id: &str,
+        sessions: &SessionManager,
+        app: &AppHandle,
+    ) {
         let k = key(session_id, tunnel_id);
         if let Some(t) = self.active.lock().await.remove(&k) {
-            t.abort.abort();
+            if let Some(handle) = t.abort {
+                handle.abort();
+            }
+            if let Some(rp) = t.remote_port {
+                sessions.remove_remote_forward(session_id, rp).await;
+            }
             let mut info = t.info;
             info.status = TunnelStatus::Stopped;
             emit_status(app, &k, &info);
@@ -179,7 +229,9 @@ impl TunnelManager {
             .collect();
         for k in keys {
             if let Some(t) = active.remove(&k) {
-                t.abort.abort();
+                if let Some(handle) = t.abort {
+                    handle.abort();
+                }
             }
         }
     }
@@ -245,10 +297,11 @@ pub async fn tunnel_start(
 pub async fn tunnel_stop(
     session_id: String,
     tunnel_id: String,
+    sessions: tauri::State<'_, SessionManager>,
     manager: tauri::State<'_, TunnelManager>,
     app: AppHandle,
 ) -> CmdResult<()> {
-    manager.stop(&session_id, &tunnel_id, &app).await;
+    manager.stop(&session_id, &tunnel_id, sessions.inner(), &app).await;
     Ok(())
 }
 
