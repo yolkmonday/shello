@@ -19,7 +19,6 @@ import RecordingPreview from "./RecordingPreview.vue";
 import SftpView from "./sftp/SftpView.vue";
 import TunnelsPanel from "./TunnelsPanel.vue";
 import LogoIcon from "./LogoIcon.vue";
-import LogoWordmark from "./LogoWordmark.vue";
 import { Icon } from "@iconify/vue";
 import { getOsIcon, getOsColor, getOsLabel } from "../lib/os-icons";
 import type { SerializedTerminal } from "../lib/terminal-to-html";
@@ -1354,20 +1353,6 @@ async function connectFromGrid(profile: ProfileSummary) {
         class="h-full overflow-y-auto"
       >
         <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 lg:py-10">
-          <!-- Header -->
-          <div class="flex items-center gap-3 mb-6">
-            <LogoWordmark :height="32" />
-            <div class="ml-auto">
-              <button
-                class="px-3 py-1.5 rounded-lg bg-otter-teal text-otter-dark font-semibold
-                       text-xs hover:opacity-90 transition-opacity"
-                @click="openNewConnection"
-              >
-                + Add Server
-              </button>
-            </div>
-          </div>
-
           <!-- Search + group filter bar -->
           <div class="mb-5 flex flex-col gap-3">
             <div class="relative">
