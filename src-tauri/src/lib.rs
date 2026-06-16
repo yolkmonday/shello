@@ -5,6 +5,7 @@ mod vault;
 mod ssh;
 mod sftp;
 mod tunnel;
+mod local;
 
 use db::DbPool;
 use vault::VaultState;
@@ -42,12 +43,17 @@ async fn ssh_exec(
 
 #[tauri::command]
 async fn ssh_disconnect(
-    state: tauri::State<'_, SessionManager>,
+    ssh: tauri::State<'_, SessionManager>,
+    local: tauri::State<'_, local::LocalSessionManager>,
     tunnels: tauri::State<'_, tunnel::TunnelManager>,
     session_id: String,
 ) -> Result<(), String> {
     tunnels.stop_all(&session_id).await;
-    state.disconnect(&session_id).await.map_err(|e| e.to_string())
+    if local.has_session(&session_id).await {
+        local.disconnect(&session_id).await.map_err(|e| e.to_string())
+    } else {
+        ssh.disconnect(&session_id).await.map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
@@ -70,21 +76,31 @@ async fn ssh_open_pty(
 
 #[tauri::command]
 async fn ssh_write(
-    state: tauri::State<'_, SessionManager>,
+    ssh: tauri::State<'_, SessionManager>,
+    local: tauri::State<'_, local::LocalSessionManager>,
     session_id: String,
     data: String,
 ) -> Result<(), String> {
-    state.write(&session_id, data).await.map_err(|e| e.to_string())
+    if local.has_session(&session_id).await {
+        local.write(&session_id, data).await.map_err(|e| e.to_string())
+    } else {
+        ssh.write(&session_id, data).await.map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
 async fn ssh_resize(
-    state: tauri::State<'_, SessionManager>,
+    ssh: tauri::State<'_, SessionManager>,
+    local: tauri::State<'_, local::LocalSessionManager>,
     session_id: String,
     cols: u32,
     rows: u32,
 ) -> Result<(), String> {
-    state.resize(&session_id, cols, rows).await.map_err(|e| e.to_string())
+    if local.has_session(&session_id).await {
+        local.resize(&session_id, cols, rows).await.map_err(|e| e.to_string())
+    } else {
+        ssh.resize(&session_id, cols, rows).await.map_err(|e| e.to_string())
+    }
 }
 
 #[tauri::command]
@@ -119,6 +135,53 @@ async fn ssh_has_running_process(
     let count: i32 = output.trim().parse().unwrap_or(0);
     // count > 1 means there's something besides the shell's own ps command
     Ok(count > 1)
+}
+
+// ── Local Shell Commands ─────────────────────────────────────────────
+
+#[tauri::command]
+async fn local_shell_open(
+    state: tauri::State<'_, local::LocalSessionManager>,
+    app_handle: tauri::AppHandle,
+    cols: u32,
+    rows: u32,
+) -> Result<String, String> {
+    state.open(cols, rows, app_handle).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn local_shell_write(
+    state: tauri::State<'_, local::LocalSessionManager>,
+    session_id: String,
+    data: String,
+) -> Result<(), String> {
+    state.write(&session_id, data).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn local_shell_resize(
+    state: tauri::State<'_, local::LocalSessionManager>,
+    session_id: String,
+    cols: u32,
+    rows: u32,
+) -> Result<(), String> {
+    state.resize(&session_id, cols, rows).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn local_shell_close(
+    state: tauri::State<'_, local::LocalSessionManager>,
+    session_id: String,
+) -> Result<(), String> {
+    state.disconnect(&session_id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+async fn local_shell_has_session(
+    state: tauri::State<'_, local::LocalSessionManager>,
+    session_id: String,
+) -> Result<bool, String> {
+    Ok(state.has_session(&session_id).await)
 }
 
 // ── Profile Commands (Sprint 4) ─────────────────────────────────────
@@ -397,6 +460,7 @@ pub fn run() {
         .manage(SessionManager::new())
         .manage(sftp::SftpManager::new())
         .manage(tunnel::TunnelManager::new())
+        .manage(local::LocalSessionManager::new())
         .invoke_handler(tauri::generate_handler![
             greet,
             ssh_connect,
@@ -462,6 +526,11 @@ pub fn run() {
             tunnel::tunnel_start,
             tunnel::tunnel_stop,
             tunnel::tunnel_active,
+            local_shell_open,
+            local_shell_write,
+            local_shell_resize,
+            local_shell_close,
+            local_shell_has_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

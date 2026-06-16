@@ -7,6 +7,7 @@ import { type ProfileSummary, type Group } from "../stores/profiles";
 import { useProfilesStore } from "../stores/profiles";
 import { useTunnelsStore } from "../stores/tunnels";
 import TerminalView from "./TerminalView.vue";
+import AddServerModal from "./AddServerModal.vue";
 import ProfileEditor from "./ProfileEditor.vue";
 import GroupEditor from "./GroupEditor.vue";
 import VaultDialog from "./VaultDialog.vue";
@@ -74,8 +75,6 @@ function parseQuickConnect(input: string): { username: string; host: string; por
 }
 
 
-const quickConnectData = ref<{ username: string; host: string; port: number } | undefined>();
-
 // Connect combobox
 const showConnectDropdown = ref(false);
 const connectSearch = ref("");
@@ -113,9 +112,8 @@ function handleConnectEnter() {
   const parsed = parseQuickConnect(connectSearch.value);
   if (parsed) {
     showConnectDropdown.value = false;
-    editingProfile.value = undefined;
-    quickConnectData.value = parsed;
-    showProfileEditor.value = true;
+    addModalPrefill.value = parsed;
+    showAddModal.value = true;
     connectSearch.value = "";
   }
 }
@@ -532,13 +530,14 @@ function onConnectDone(error: string | null) {
 // Profile/Group editor state
 const showProfileEditor = ref(false);
 const editingProfile = ref<ProfileSummary | undefined>();
+const showAddModal = ref(false);
+const addModalPrefill = ref<{ username: string; host: string; port: number } | undefined>();
 const showGroupEditor = ref(false);
 const editingGroup = ref<Group | undefined>();
 
 function openNewConnection() {
-  editingProfile.value = undefined;
-  quickConnectData.value = undefined;
-  showProfileEditor.value = true;
+  addModalPrefill.value = undefined;
+  showAddModal.value = true;
 }
 
 function openEditProfile(profile: ProfileSummary) {
@@ -549,6 +548,27 @@ function openEditProfile(profile: ProfileSummary) {
 function onConnected(newSessionId: string) {
   currentView.value = newSessionId;
   detectOs(newSessionId);
+}
+
+async function connectLocalShell() {
+  try {
+    const sessionId = await invoke<string>("local_shell_open", {
+      cols: 80,
+      rows: 24,
+    });
+    store.addSession(sessionId, {
+      id: sessionId,
+      host: "localhost",
+      port: 0,
+      username: "local",
+      connected_at: new Date().toISOString(),
+      status: "connected",
+      profile_name: "Local Terminal",
+    });
+    currentView.value = sessionId;
+  } catch (e) {
+    console.error("Failed to open local shell:", e);
+  }
 }
 
 async function detectOs(sessionId: string, profileId?: string) {
@@ -724,8 +744,9 @@ const paletteItems = computed<PaletteItem[]>(() => {
   items.push(
     { id: "home", label: "Go to Home", icon: "mdi:home", action: () => { switchToHome(); showPalette.value = false; }, category: "Navigate" },
     { id: "settings", label: "Open Settings", icon: "mdi:cog", action: () => { switchToSettings(); showPalette.value = false; }, category: "Navigate" },
-    { id: "new", label: "Add New Server", icon: "mdi:plus", action: () => { openNewConnection(); showPalette.value = false; }, category: "Actions" },
-    { id: "snippets", label: "Open Snippets", icon: "mdi:console", action: () => { showSnippets.value = true; showPalette.value = false; }, category: "Actions" },
+    { id: "new", label: "Add New Server", icon: "mdi:plus", action: () => { addModalPrefill.value = undefined; showAddModal.value = true; showPalette.value = false; }, category: "Actions" },
+    { id: "local", label: "Open Local Terminal", icon: "mdi:console", action: () => { connectLocalShell(); showPalette.value = false; }, category: "Actions" },
+    { id: "snippets", label: "Open Snippets", icon: "mdi:console-line", action: () => { showSnippets.value = true; showPalette.value = false; }, category: "Actions" },
     { id: "keys", label: "Open Key Manager", icon: "mdi:key-variant", action: () => { showKeyManager.value = true; showPalette.value = false; }, category: "Actions" },
     { id: "recipes", label: "Open Recipes", icon: "mdi:book-play-outline", action: () => { showRecipes.value = true; showPalette.value = false; }, category: "Actions" },
   );
@@ -1746,11 +1767,18 @@ async function connectFromGrid(profile: ProfileSummary) {
       </template>
     </div>
 
+    <AddServerModal
+      v-if="showAddModal"
+      :prefill="addModalPrefill"
+      @close="showAddModal = false; addModalPrefill = undefined"
+      @saved="showAddModal = false"
+      @connected="onConnected"
+    />
+
     <ProfileEditor
       v-if="showProfileEditor"
       :profile="editingProfile"
-      :prefill="quickConnectData"
-      @close="showProfileEditor = false; quickConnectData = undefined"
+      @close="showProfileEditor = false"
       @saved="showProfileEditor = false"
       @connected="onConnected"
     />
@@ -1878,13 +1906,22 @@ async function connectFromGrid(profile: ProfileSummary) {
               <span class="flex items-center gap-1"><kbd class="px-1 py-0.5 rounded bg-otter-surface border border-otter-border font-mono">↵</kbd> connect</span>
               <span class="flex items-center gap-1"><kbd class="px-1 py-0.5 rounded bg-otter-surface border border-otter-border font-mono">esc</kbd> close</span>
             </div>
-            <button
-              class="flex items-center gap-1.5 text-[11px] text-otter-teal hover:underline"
-              @click="showConnectDropdown = false; openNewConnection()"
-            >
-              <Icon icon="mdi:plus" class="w-3 h-3" />
-              Add New Server
-            </button>
+            <div class="flex items-center gap-3">
+              <button
+                class="flex items-center gap-1.5 text-[11px] text-otter-muted hover:text-otter-teal transition-colors"
+                @click="showConnectDropdown = false; connectLocalShell()"
+              >
+                <Icon icon="mdi:console" class="w-3 h-3" />
+                Local Terminal
+              </button>
+              <button
+                class="flex items-center gap-1.5 text-[11px] text-otter-teal hover:underline"
+                @click="showConnectDropdown = false; addModalPrefill = undefined; showAddModal = true"
+              >
+                <Icon icon="mdi:plus" class="w-3 h-3" />
+                Add New Server
+              </button>
+            </div>
           </div>
         </div>
       </div>
