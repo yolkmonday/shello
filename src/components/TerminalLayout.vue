@@ -18,6 +18,7 @@ import ScreenshotPreview from "./ScreenshotPreview.vue";
 import RecordingPreview from "./RecordingPreview.vue";
 import SftpView from "./sftp/SftpView.vue";
 import TunnelsPanel from "./TunnelsPanel.vue";
+import { confirm } from "@tauri-apps/plugin-dialog";
 import LogoIcon from "./LogoIcon.vue";
 import { Icon } from "@iconify/vue";
 import { getOsIcon, getOsColor, getOsLabel } from "../lib/os-icons";
@@ -808,18 +809,6 @@ function recordLastConnected(profileId: string) {
   localStorage.setItem("shello-last-connected", JSON.stringify(lastConnected.value));
 }
 
-function formatTimeAgo(iso: string): string {
-  const diff = Date.now() - new Date(iso).getTime();
-  const mins = Math.floor(diff / 60000);
-  if (mins < 1) return "just now";
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  const days = Math.floor(hours / 24);
-  if (days < 30) return `${days}d ago`;
-  return new Date(iso).toLocaleDateString();
-}
-
 // Home grid helpers
 const homeSearch = ref("");
 const activeGroupFilter = ref<string | null>(null);
@@ -829,6 +818,58 @@ const allProfiles = computed(() =>
     (a, b) => a.sort_order - b.sort_order || a.name.localeCompare(b.name)
   )
 );
+
+// ── Server card: favorites + right-click context menu ──────────────
+const favorites = ref<Set<string>>(
+  new Set(JSON.parse(localStorage.getItem("shello-favorites") || "[]")),
+);
+function toggleFavorite(id: string) {
+  const s = new Set(favorites.value);
+  if (s.has(id)) s.delete(id);
+  else s.add(id);
+  favorites.value = s;
+  localStorage.setItem("shello-favorites", JSON.stringify([...s]));
+}
+
+const cardMenu = ref<{ profile: ProfileSummary | null; x: number; y: number }>({
+  profile: null,
+  x: 0,
+  y: 0,
+});
+function openCardMenu(e: MouseEvent, profile: ProfileSummary) {
+  e.preventDefault();
+  cardMenu.value = {
+    profile,
+    x: Math.min(e.clientX, window.innerWidth - 200),
+    y: Math.min(e.clientY, window.innerHeight - 290),
+  };
+}
+function closeCardMenu() {
+  cardMenu.value = { profile: null, x: 0, y: 0 };
+}
+
+function reconnectProfile(profile: ProfileSummary) {
+  const session = Object.values(store.sessions).find((s) => s.profile_id === profile.id);
+  if (session) reconnectSession(session);
+  else connectFromGrid(profile);
+}
+
+async function duplicateProfile(profile: ProfileSummary) {
+  try {
+    await invoke("profile_duplicate", { id: profile.id });
+    await profilesStore.loadAll();
+  } catch (e) {
+    console.error("duplicate failed", e);
+  }
+}
+
+async function deleteProfileConfirm(profile: ProfileSummary) {
+  const ok = await confirm(`Delete "${profile.name}"? This cannot be undone.`, {
+    title: "Delete server",
+    kind: "warning",
+  });
+  if (ok) await profilesStore.deleteProfile(profile.id);
+}
 
 const allGroups = computed(() => Object.values(profilesStore.groups));
 
@@ -919,7 +960,10 @@ const filteredHomeProfiles = computed(() => {
       p.username.toLowerCase().includes(q)
     );
   }
-  return list;
+  // Favorites first.
+  return [...list].sort(
+    (a, b) => (favorites.value.has(b.id) ? 1 : 0) - (favorites.value.has(a.id) ? 1 : 0),
+  );
 });
 
 async function openSftpFromGrid(profile: ProfileSummary) {
@@ -970,11 +1014,6 @@ function closeSftp(sessionId: string) {
   if (currentView.value === "sftp:" + sessionId) {
     currentView.value = store.sessions[sessionId] ? sessionId : "home";
   }
-}
-
-function getGroup(groupId: string | null): Group | null {
-  if (!groupId) return null;
-  return profilesStore.groups[groupId] ?? null;
 }
 
 async function connectFromGrid(profile: ProfileSummary) {
@@ -1276,6 +1315,44 @@ async function connectFromGrid(profile: ProfileSummary) {
         :session-id="currentView"
         @close="showTunnels = false"
       />
+
+      <!-- Server card context menu -->
+      <div
+        v-if="cardMenu.profile"
+        class="fixed inset-0 z-[60]"
+        @click="closeCardMenu"
+        @contextmenu.prevent="closeCardMenu"
+      >
+        <div
+          class="absolute w-48 bg-otter-card border border-otter-border rounded-lg shadow-xl py-1 text-sm"
+          :style="{ left: cardMenu.x + 'px', top: cardMenu.y + 'px' }"
+          @click.stop
+        >
+          <button class="w-full flex items-center gap-2 px-3 py-1.5 text-otter-text hover:bg-otter-surface" @click="connectFromGrid(cardMenu.profile!); closeCardMenu()">
+            <Icon icon="mdi:connection" class="w-4 h-4 text-otter-muted" /> Connect
+          </button>
+          <button class="w-full flex items-center gap-2 px-3 py-1.5 text-otter-text hover:bg-otter-surface" @click="reconnectProfile(cardMenu.profile!); closeCardMenu()">
+            <Icon icon="mdi:refresh" class="w-4 h-4 text-otter-muted" /> Reconnect
+          </button>
+          <button class="w-full flex items-center gap-2 px-3 py-1.5 text-otter-text hover:bg-otter-surface" @click="openSftpFromGrid(cardMenu.profile!); closeCardMenu()">
+            <Icon icon="mdi:folder-network-outline" class="w-4 h-4 text-otter-muted" /> Open SFTP
+          </button>
+          <button class="w-full flex items-center gap-2 px-3 py-1.5 text-otter-text hover:bg-otter-surface" @click="openEditProfile(cardMenu.profile!); closeCardMenu()">
+            <Icon icon="mdi:pencil-outline" class="w-4 h-4 text-otter-muted" /> Edit
+          </button>
+          <button class="w-full flex items-center gap-2 px-3 py-1.5 text-otter-text hover:bg-otter-surface" @click="duplicateProfile(cardMenu.profile!); closeCardMenu()">
+            <Icon icon="mdi:content-copy" class="w-4 h-4 text-otter-muted" /> Duplicate
+          </button>
+          <button class="w-full flex items-center gap-2 px-3 py-1.5 text-otter-text hover:bg-otter-surface" @click="toggleFavorite(cardMenu.profile!.id); closeCardMenu()">
+            <Icon :icon="favorites.has(cardMenu.profile!.id) ? 'mdi:star-off' : 'mdi:star'" class="w-4 h-4 text-otter-muted" />
+            {{ favorites.has(cardMenu.profile!.id) ? 'Unfavorite' : 'Favorite' }}
+          </button>
+          <div class="my-1 border-t border-otter-border"></div>
+          <button class="w-full flex items-center gap-2 px-3 py-1.5 text-otter-coral hover:bg-otter-surface" @click="deleteProfileConfirm(cardMenu.profile!); closeCardMenu()">
+            <Icon icon="mdi:trash-can-outline" class="w-4 h-4" /> Delete
+          </button>
+        </div>
+      </div>
       <!-- Connection loading overlay -->
       <Transition name="fade">
         <div
@@ -1391,14 +1468,13 @@ async function connectFromGrid(profile: ProfileSummary) {
           </div>
 
           <!-- Server grid -->
-          <div v-if="filteredHomeProfiles.length > 0 || allProfiles.length > 0" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6 gap-3">
+          <div v-if="filteredHomeProfiles.length > 0 || allProfiles.length > 0" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-2">
             <div
               v-for="profile in filteredHomeProfiles"
               :key="profile.id"
               draggable="true"
-              class="group relative bg-otter-card border border-otter-border rounded-xl p-4
-                     cursor-pointer hover:border-otter-teal-dim hover:bg-otter-surface/50
-                     transition-all duration-200"
+              class="group relative flex items-center gap-2.5 bg-otter-card border border-otter-border rounded-lg px-3 py-2.5
+                     cursor-pointer hover:border-otter-teal-dim hover:bg-otter-surface/50 transition-all duration-200"
               :class="[
                 connectingProfile?.id === profile.id ? 'opacity-50 pointer-events-none' : '',
                 dragCardId === profile.id ? 'opacity-40' : '',
@@ -1406,95 +1482,66 @@ async function connectFromGrid(profile: ProfileSummary) {
                 selectedServers.has(profile.id) ? 'ring-2 ring-otter-blue border-otter-blue' : ''
               ]"
               @click="handleServerClick($event, profile)"
+              @contextmenu="openCardMenu($event, profile)"
               @dragstart="onCardDragStart($event, profile.id)"
               @dragover="onCardDragOver($event, profile.id)"
               @drop="onCardDrop($event, profile.id)"
               @dragend="onCardDragEnd"
             >
-              <!-- Group + auth icon -->
-              <div class="flex items-center gap-2 mb-2">
-                <div
-                  v-if="getGroup(profile.group_id)"
-                  class="w-2 h-2 rounded-full flex-shrink-0"
-                  :style="{ backgroundColor: getGroup(profile.group_id)!.color }"
-                ></div>
-                <span class="text-xs text-otter-subtle uppercase tracking-wider truncate">
-                  {{ getGroup(profile.group_id)?.name || 'Ungrouped' }}
-                </span>
+              <!-- OS icon -->
+              <div class="w-8 h-8 rounded-lg bg-otter-surface flex items-center justify-center flex-shrink-0">
                 <Icon
-                  :icon="profile.auth_type === 'key' ? 'mdi:key-variant' : 'mdi:lock'"
-                  class="ml-auto w-3.5 h-3.5"
-                  :class="profile.auth_type === 'key' ? 'text-otter-teal' : 'text-amber-400'"
-                  :title="profile.auth_type === 'key' ? 'Key authentication' : 'Password authentication'"
+                  v-if="profile.detected_os"
+                  :icon="getOsIcon({ os_type: '', distro: profile.detected_os })"
+                  class="w-5 h-5"
+                  :style="{ color: getOsColor({ os_type: '', distro: profile.detected_os }) }"
+                  :title="getOsLabel({ os_type: '', distro: profile.detected_os })"
                 />
+                <LogoIcon v-else :size="18" />
               </div>
 
-              <div class="flex items-center gap-3">
-                <div class="w-10 h-10 rounded-lg bg-otter-surface flex items-center justify-center flex-shrink-0">
-                  <Icon
-                    v-if="profile.detected_os"
-                    :icon="getOsIcon({ os_type: '', distro: profile.detected_os })"
-                    class="w-6 h-6"
-                    :style="{ color: getOsColor({ os_type: '', distro: profile.detected_os }) }"
-                    :title="getOsLabel({ os_type: '', distro: profile.detected_os })"
-                  />
-                  <LogoIcon v-else :size="24" />
+              <!-- Name -->
+              <div class="min-w-0 flex-1">
+                <div class="flex items-center gap-1">
+                  <Icon v-if="favorites.has(profile.id)" icon="mdi:star" class="w-3 h-3 text-otter-subtle flex-shrink-0" />
+                  <h3 class="text-sm font-semibold text-otter-text truncate">{{ profile.name }}</h3>
                 </div>
-                <div class="min-w-0 flex-1">
-                  <h3 class="text-base font-semibold text-otter-text truncate">
-                    {{ profile.name }}
-                  </h3>
-                  <p v-if="lastConnected[profile.id]" class="text-[10px] text-otter-subtle mt-0.5">
-                    {{ formatTimeAgo(lastConnected[profile.id]) }}
-                  </p>
-                </div>
+                <p class="text-[10px] text-otter-subtle truncate font-mono">{{ profile.username }}@{{ profile.host }}</p>
               </div>
 
-              <!-- Connecting state -->
+              <!-- Auth indicator (muted, blends with theme) -->
+              <Icon
+                :icon="profile.auth_type === 'key' ? 'mdi:key-variant' : 'mdi:lock'"
+                class="w-3.5 h-3.5 flex-shrink-0 text-otter-subtle"
+                :title="profile.auth_type === 'key' ? 'Key authentication' : 'Password authentication'"
+              />
+
+              <!-- Edit -->
+              <button
+                class="flex-shrink-0 p-1 rounded hover:bg-otter-surface text-otter-subtle hover:text-otter-text opacity-0 group-hover:opacity-100 transition-all"
+                title="Edit"
+                @click.stop="openEditProfile(profile)"
+              >
+                <Icon icon="mdi:pencil-outline" class="w-4 h-4" />
+              </button>
+
+              <!-- Connecting overlay -->
               <div
                 v-if="connectingProfile?.id === profile.id"
-                class="absolute inset-0 rounded-xl bg-otter-dark/80 flex items-center justify-center"
+                class="absolute inset-0 rounded-lg bg-otter-dark/80 flex items-center justify-center"
               >
                 <span class="inline-block w-4 h-4 border-2 border-otter-teal border-t-transparent rounded-full animate-spin"></span>
               </div>
-
-              <!-- Hover SFTP button -->
-              <button
-                class="absolute left-2 bottom-2 flex items-center gap-1 px-2 py-1
-                       rounded-md bg-otter-surface/90 border border-otter-border
-                       text-otter-muted hover:text-otter-teal hover:border-otter-teal-dim
-                       opacity-0 group-hover:opacity-100 transition-all"
-                title="Open SFTP"
-                @click.stop="openSftpFromGrid(profile)"
-              >
-                <Icon icon="mdi:folder-network-outline" class="w-3 h-3" />
-                <span class="text-xs">SFTP</span>
-              </button>
-
-              <!-- Hover edit button -->
-              <button
-                class="absolute right-2 bottom-2 flex items-center gap-1 px-2 py-1
-                       rounded-md bg-otter-surface/90 border border-otter-border
-                       text-otter-muted hover:text-otter-text hover:border-otter-subtle
-                       opacity-0 group-hover:opacity-100 transition-all"
-                @click.stop="openEditProfile(profile)"
-              >
-                <svg class="w-3 h-3" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
-                  <path d="M11.5 1.5l3 3L5 14H2v-3L11.5 1.5z" />
-                </svg>
-                <span class="text-xs">Edit</span>
-              </button>
             </div>
 
             <!-- Add new server card -->
             <div
-              class="flex flex-col items-center justify-center gap-2 bg-otter-card/50
-                     border border-dashed border-otter-border rounded-xl p-4 cursor-pointer
-                     hover:border-otter-teal-dim hover:bg-otter-surface/30 transition-all duration-200
-                     min-h-[120px]"
+              class="flex items-center justify-center gap-1.5 bg-otter-card/50
+                     border border-dashed border-otter-border rounded-lg px-3 py-2.5 cursor-pointer
+                     hover:border-otter-teal-dim hover:bg-otter-surface/30 transition-all duration-200"
               @click="openNewConnection"
             >
-              <span class="text-2xl text-otter-subtle">+</span>
+              <span class="text-lg text-otter-subtle leading-none">+</span>
               <span class="text-xs text-otter-subtle">Add Server</span>
             </div>
           </div>

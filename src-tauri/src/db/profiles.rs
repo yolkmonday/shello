@@ -244,6 +244,37 @@ pub async fn create_profile(pool: &DbPool, input: CreateProfileInput, vault: &Va
     get_profile_summary(pool, &id).await
 }
 
+/// Duplicate a profile, copying all fields (including encrypted credentials)
+/// into a new row named "<name> copy".
+pub async fn duplicate_profile(pool: &DbPool, id: &str) -> Result<ProfileSummary> {
+    let src = get_profile(pool, id).await?;
+    let new_id = ulid::Ulid::new().to_string();
+    let now = chrono::Utc::now().to_rfc3339();
+    let new_name = format!("{} copy", src.name);
+
+    sqlx::query(
+        "INSERT INTO profiles (id, name, host, port, username, auth_type, password_enc, key_path_enc, passphrase_enc, group_id, tags, sort_order, sync_status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'pending', ?, ?)"
+    )
+    .bind(&new_id)
+    .bind(&new_name)
+    .bind(&src.host)
+    .bind(src.port)
+    .bind(&src.username)
+    .bind(&src.auth_type)
+    .bind(&src.password_enc)
+    .bind(&src.key_path_enc)
+    .bind(&src.passphrase_enc)
+    .bind(&src.group_id)
+    .bind(&src.tags)
+    .bind(&now)
+    .bind(&now)
+    .execute(pool)
+    .await?;
+
+    get_profile_summary(pool, &new_id).await
+}
+
 pub async fn get_profile_summary(pool: &DbPool, id: &str) -> Result<ProfileSummary> {
     let profile = sqlx::query_as::<_, ProfileSummary>(
         "SELECT id, name, host, port, username, auth_type, group_id, tags, sort_order, detected_os, created_at, updated_at

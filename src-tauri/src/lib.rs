@@ -150,6 +150,14 @@ async fn profile_update(
 }
 
 #[tauri::command]
+async fn profile_duplicate(
+    pool: tauri::State<'_, DbPool>,
+    id: String,
+) -> Result<profiles::ProfileSummary, String> {
+    profiles::duplicate_profile(&pool, &id).await.map_err(|e| e.to_string())
+}
+
+#[tauri::command]
 async fn profile_delete(
     pool: tauri::State<'_, DbPool>,
     id: String,
@@ -404,6 +412,7 @@ pub fn run() {
             profile_create,
             profile_update,
             profile_delete,
+            profile_duplicate,
             profile_search,
             profile_connect,
             profile_get_password,
