@@ -18,8 +18,12 @@ jobs:
           - platform: macos-14
             args: "--target universal-apple-darwin"
             rust-targets: "aarch64-apple-darwin,x86_64-apple-darwin"
-          # Linux — .deb / .rpm / .AppImage
+          # Linux x86_64 — .deb / .rpm / .AppImage
           - platform: ubuntu-22.04
+            args: ""
+            rust-targets: ""
+          # Linux aarch64 — .deb / .rpm / .AppImage
+          - platform: ubuntu-22.04-arm
             args: ""
             rust-targets: ""
           # Windows — .msi / .exe (NSIS)
@@ -32,7 +36,7 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Install Linux dependencies
-        if: matrix.platform == 'ubuntu-22.04'
+        if: startsWith(matrix.platform, 'ubuntu-')
         run: |
           sudo apt-get update
           sudo apt-get install -y \
