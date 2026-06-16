@@ -1,6 +1,6 @@
 [package]
 name = "shello"
-version = "0.1.5"
+version = "0.1.6"
 description = "Lightweight SSH client"
 authors = ["Ari"]
 edition = "2021"
