@@ -96,7 +96,26 @@ Tag pushes (`v*`) trigger `.github/workflows/release.yml`, which builds a univer
 
 ## Contributing
 
-Issues and pull requests are welcome. Please open an issue to discuss substantial changes before submitting a PR.
+Issues and pull requests are welcome! Please read [CONTRIBUTING.md](./CONTRIBUTING.md) before submitting.
+
+- **Bug reports** — [open an issue](https://github.com/yolkmonday/shello/issues) with OS, architecture, version, and steps to reproduce.
+- **Feature requests** — open an issue to discuss before starting work.
+- **Pull requests** — fork, branch from `main`, follow the [commit convention](./CONTRIBUTING.md#commit-convention), and open a PR.
+
+### Development Setup
+
+```sh
+git clone https://github.com/yolkmonday/shello.git
+cd shello
+bun install
+bun run tauri dev
+```
+
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for full guidelines including the release process.
+
+## Changelog
+
+See [CHANGELOG.md](./CHANGELOG.md) for release history.
 
 ## License
 
