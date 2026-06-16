@@ -759,7 +759,7 @@ async function importProfiles() {
               <LogoWordmark :height="28" />
               <span class="text-xs text-otter-subtle font-mono ml-1">v{{ appVersion || '—' }}</span>
             </div>
-            <p class="text-xs text-otter-subtle mt-3">A modern SSH client built with Tauri.</p>
+            <p class="text-xs text-otter-subtle mt-3">A lightweight, local-first SSH client.</p>
           </div>
 
           <!-- Software updates -->
