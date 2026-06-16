@@ -48,6 +48,7 @@ jobs:
             libssl-dev \
             patchelf \
             build-essential \
+            xdg-utils \
             curl wget file
 
       - uses: oven-sh/setup-bun@v2
