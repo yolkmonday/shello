@@ -670,6 +670,11 @@ function openChangePassword() {
   showVault.value = true;
 }
 
+function openVaultSetup() {
+  vaultMode.value = "setup";
+  showVault.value = true;
+}
+
 // Register vault locked handler
 profilesStore.onVaultLocked = handleVaultLocked;
 
@@ -1422,6 +1427,7 @@ async function connectFromGrid(profile: ProfileSummary) {
         v-show="currentView === 'settings'"
         @back="switchToHome"
         @change-password="openChangePassword"
+        @setup-vault="openVaultSetup"
       />
 
       <!-- Home: server grid -->

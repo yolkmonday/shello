@@ -440,6 +440,7 @@ pub fn run() {
             vault::vault_lock,
             vault::vault_change_password,
             vault::vault_forget_device,
+            vault::vault_disable,
             sftp::sftp_open,
             sftp::sftp_list,
             sftp::sftp_local_list,

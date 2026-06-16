@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from "vue";
 import { invoke } from "@tauri-apps/api/core";
-import { save, open } from "@tauri-apps/plugin-dialog";
+import { save, open, confirm } from "@tauri-apps/plugin-dialog";
 import { writeTextFile, readTextFile } from "@tauri-apps/plugin-fs";
 import { useTerminalStore } from "../stores/terminal";
 import { useProfilesStore } from "../stores/profiles";
@@ -15,6 +15,7 @@ import { useUpdaterStore } from "../stores/updater";
 
 const emit = defineEmits<{
   "change-password": [];
+  "setup-vault": [];
   back: [];
 }>();
 
@@ -103,6 +104,35 @@ async function forgetDevice() {
     await profilesStore.checkVaultStatus();
   } catch (e) {
     console.error("Failed to forget device:", e);
+  }
+}
+
+const vaultMessage = ref("");
+
+function enableVault() {
+  emit("setup-vault");
+}
+
+async function disableVault() {
+  vaultMessage.value = "";
+  if (!profilesStore.vaultStatus.unlocked) {
+    vaultMessage.value = "Unlock the vault first (connect to a server), then disable it.";
+    return;
+  }
+  const ok = await confirm(
+    "Disable credential encryption? Saved passwords and keys will be stored in plain text.",
+    { title: "Disable encryption", kind: "warning" },
+  );
+  if (!ok) return;
+  try {
+    await invoke("vault_disable");
+    await profilesStore.checkVaultStatus();
+    vaultMessage.value = "Credential encryption disabled.";
+    setTimeout(() => {
+      vaultMessage.value = "";
+    }, 4000);
+  } catch (e) {
+    vaultMessage.value = String(e);
   }
 }
 
@@ -557,6 +587,29 @@ async function importProfiles() {
             <h2 class="text-base font-semibold text-otter-text mb-1">Security</h2>
             <p class="text-xs text-otter-subtle">Vault and credential management</p>
           </div>
+
+          <!-- Credential encryption toggle -->
+          <div class="flex items-center justify-between bg-otter-card border border-otter-border rounded-xl px-5 py-4">
+            <div class="min-w-0 pr-3">
+              <p class="text-sm text-otter-text">Credential Encryption</p>
+              <p class="text-xs text-otter-subtle mt-0.5">
+                {{ profilesStore.vaultStatus.initialized
+                  ? 'Passwords and keys are encrypted with a master password'
+                  : 'Passwords and keys are stored in plain text' }}
+              </p>
+            </div>
+            <button
+              v-if="!profilesStore.vaultStatus.initialized"
+              class="px-3 py-1.5 rounded-lg bg-otter-teal text-otter-dark text-xs font-medium hover:opacity-90 flex-shrink-0"
+              @click="enableVault"
+            >Enable</button>
+            <button
+              v-else
+              class="px-3 py-1.5 rounded-lg bg-otter-surface border border-otter-border text-xs text-otter-coral hover:border-otter-coral/60 flex-shrink-0"
+              @click="disableVault"
+            >Disable</button>
+          </div>
+          <p v-if="vaultMessage" class="text-xs text-otter-subtle -mt-3">{{ vaultMessage }}</p>
 
           <!-- Vault Status -->
           <div class="flex items-center justify-between bg-otter-card border border-otter-border rounded-xl px-5 py-4">

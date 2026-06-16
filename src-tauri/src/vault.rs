@@ -368,6 +368,63 @@ pub async fn vault_change_password(
     Ok(())
 }
 
+/// Disable the vault: decrypt all stored credentials back to plain text, drop
+/// the vault config, clear the keychain, and lock. Requires the vault to be
+/// unlocked (the key is needed to decrypt). Inverse of `vault_setup`.
+#[tauri::command]
+pub async fn vault_disable(
+    pool: tauri::State<'_, DbPool>,
+    vault: tauri::State<'_, VaultState>,
+) -> Result<(), String> {
+    if !vault_is_initialized(&pool).await {
+        return Ok(());
+    }
+    let key = vault.get_key().map_err(|_| "vault_locked".to_string())?;
+
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    let rows: Vec<(String, Option<Vec<u8>>, Option<Vec<u8>>, Option<Vec<u8>>)> =
+        sqlx::query_as("SELECT id, password_enc, key_path_enc, passphrase_enc FROM profiles")
+            .fetch_all(&mut *tx)
+            .await
+            .map_err(|e| e.to_string())?;
+
+    let decrypt = |blob: Option<Vec<u8>>| -> Result<Option<Vec<u8>>, String> {
+        match blob.filter(|b| !b.is_empty()) {
+            Some(b) => crypto::decrypt(&b, &key).map(Some).map_err(|e| e.to_string()),
+            None => Ok(None),
+        }
+    };
+
+    for (id, pass, kpath, phrase) in rows {
+        let dec_pass = decrypt(pass)?;
+        let dec_kpath = decrypt(kpath)?;
+        let dec_phrase = decrypt(phrase)?;
+
+        sqlx::query(
+            "UPDATE profiles SET password_enc = ?, key_path_enc = ?, passphrase_enc = ? WHERE id = ?",
+        )
+        .bind(&dec_pass)
+        .bind(&dec_kpath)
+        .bind(&dec_phrase)
+        .bind(&id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+    }
+
+    sqlx::query("DELETE FROM vault_config")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+
+    let _ = keychain_delete();
+    vault.lock();
+    Ok(())
+}
+
 #[tauri::command]
 pub async fn vault_forget_device(
     vault: tauri::State<'_, VaultState>,
