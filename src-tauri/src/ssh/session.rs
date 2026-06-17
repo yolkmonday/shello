@@ -112,6 +112,20 @@ impl SessionManager {
         }
     }
 
+    /// Take the unverified host key recorded during the handshake (if the host
+    /// was unknown), so the caller can prompt the user to confirm it.
+    pub async fn take_pending_host_key(
+        &self,
+        session_id: &str,
+    ) -> Option<super::client::PendingHostKey> {
+        let pending_arc = {
+            let sessions = self.sessions.lock().await;
+            sessions.get(session_id)?.pending()
+        };
+        let result = pending_arc.lock().await.take();
+        result
+    }
+
     /// Open a PTY on an existing session.
     /// Note: russh Handle does NOT implement Clone, so we hold the
     /// sessions lock during PTY open. This blocks other session

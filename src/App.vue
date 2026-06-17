@@ -4,6 +4,7 @@ import { useProfilesStore } from "./stores/profiles";
 import { useUpdaterStore } from "./stores/updater";
 import TerminalLayout from "./components/TerminalLayout.vue";
 import UpdateToast from "./components/UpdateToast.vue";
+import HostKeyDialog from "./components/HostKeyDialog.vue";
 
 const profilesStore = useProfilesStore();
 const updaterStore = useUpdaterStore();
@@ -18,4 +19,5 @@ onMounted(async () => {
 <template>
   <TerminalLayout />
   <UpdateToast />
+  <HostKeyDialog />
 </template>

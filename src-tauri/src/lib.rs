@@ -22,14 +22,89 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! Welcome to Shello.", name)
 }
 
+// ── Host key verification ────────────────────────────────────────────
+
+/// Pending host-key confirmation prompts, keyed by request id.
+#[derive(Default)]
+struct HostKeyPrompts(
+    tokio::sync::Mutex<std::collections::HashMap<String, tokio::sync::oneshot::Sender<bool>>>,
+);
+
+/// After a successful connect, if the server was an unknown host, prompt the
+/// user to confirm its fingerprint. On accept, record it in known_hosts; on
+/// reject, disconnect and error.
+async fn confirm_host_key(
+    app: &tauri::AppHandle,
+    prompts: &HostKeyPrompts,
+    sessions: &SessionManager,
+    session_id: &str,
+    host: &str,
+    port: u16,
+) -> Result<(), String> {
+    use tauri::Emitter;
+
+    let pending = match sessions.take_pending_host_key(session_id).await {
+        Some(p) => p,
+        None => return Ok(()), // known host — nothing to confirm
+    };
+
+    let id = ulid::Ulid::new().to_string();
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    prompts.0.lock().await.insert(id.clone(), tx);
+    let _ = app.emit(
+        "host-key-prompt",
+        serde_json::json!({
+            "id": id,
+            "host": host,
+            "port": port,
+            "fingerprint": pending.fingerprint,
+        }),
+    );
+
+    let accepted = rx.await.unwrap_or(false);
+    prompts.0.lock().await.remove(&id);
+
+    if accepted {
+        russh::keys::known_hosts::learn_known_hosts(host, port, &pending.key)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    } else {
+        let _ = sessions.disconnect(session_id).await;
+        Err("host_key_rejected: host key not trusted — connection cancelled".to_string())
+    }
+}
+
+#[tauri::command]
+async fn host_key_respond(
+    prompts: tauri::State<'_, HostKeyPrompts>,
+    id: String,
+    accept: bool,
+) -> Result<(), String> {
+    if let Some(tx) = prompts.0.lock().await.remove(&id) {
+        let _ = tx.send(accept);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn ssh_forget_host_key(host: String, port: u16) -> Result<(), String> {
+    ssh::client::forget_host_key(&host, port).map_err(|e| e.to_string())
+}
+
 // ── SSH Commands (Sprint 2–3) ────────────────────────────────────────
 
 #[tauri::command]
 async fn ssh_connect(
     state: tauri::State<'_, SessionManager>,
+    prompts: tauri::State<'_, HostKeyPrompts>,
+    app: tauri::AppHandle,
     config: ConnectionConfig,
 ) -> Result<String, String> {
-    state.connect(config).await.map_err(|e| e.to_string())
+    let host = config.host.clone();
+    let port = config.port;
+    let session_id = state.connect(config).await.map_err(|e| e.to_string())?;
+    confirm_host_key(&app, &prompts, &state, &session_id, &host, port).await?;
+    Ok(session_id)
 }
 
 #[tauri::command]
@@ -241,6 +316,7 @@ async fn profile_connect(
     pool: tauri::State<'_, DbPool>,
     vault: tauri::State<'_, VaultState>,
     session_manager: tauri::State<'_, SessionManager>,
+    prompts: tauri::State<'_, HostKeyPrompts>,
     app_handle: tauri::AppHandle,
     profile_id: String,
     cols: u32,
@@ -264,6 +340,9 @@ async fn profile_connect(
         other => return Err(format!("Unknown auth type: {}", other)),
     };
 
+    let connect_host = profile.host.clone();
+    let connect_port = profile.port as u16;
+
     let config = ConnectionConfig {
         host: profile.host,
         port: profile.port as u16,
@@ -276,6 +355,16 @@ async fn profile_connect(
         .connect(config)
         .await
         .map_err(|e| e.to_string())?;
+
+    confirm_host_key(
+        &app_handle,
+        &prompts,
+        &session_manager,
+        &session_id,
+        &connect_host,
+        connect_port,
+    )
+    .await?;
 
     session_manager
         .open_pty(&session_id, cols, rows, app_handle)
@@ -460,6 +549,7 @@ pub fn run() {
         .manage(SessionManager::new())
         .manage(sftp::SftpManager::new())
         .manage(tunnel::TunnelManager::new())
+        .manage(HostKeyPrompts::default())
         .manage(local::LocalSessionManager::new())
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -505,6 +595,8 @@ pub fn run() {
             vault::vault_change_password,
             vault::vault_forget_device,
             vault::vault_disable,
+            host_key_respond,
+            ssh_forget_host_key,
             sftp::sftp_open,
             sftp::sftp_list,
             sftp::sftp_local_list,

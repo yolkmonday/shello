@@ -527,6 +527,18 @@ function onConnectDone(error: string | null) {
   }
 }
 
+async function forgetKeyAndRetry() {
+  const profile = connectingProfile.value;
+  if (!profile) return;
+  try {
+    await invoke("ssh_forget_host_key", { host: profile.host, port: profile.port });
+  } catch {
+    // ignore — proceed to retry regardless
+  }
+  connectError.value = null;
+  connectFromGrid(profile);
+}
+
 // Profile/Group editor state
 const showProfileEditor = ref(false);
 const editingProfile = ref<ProfileSummary | undefined>();
@@ -1423,6 +1435,14 @@ async function connectFromGrid(profile: ProfileSummary) {
               <p class="text-sm font-semibold text-otter-coral">Connection Failed</p>
               <p class="text-xs text-otter-muted break-all px-2">{{ connectError }}</p>
               <div class="flex gap-2 mt-1">
+                <button
+                  v-if="connectError && connectError.includes('host_key_changed')"
+                  class="px-3 py-1.5 rounded-lg bg-otter-coral text-white font-semibold
+                         text-xs hover:opacity-90 transition-opacity"
+                  @click="forgetKeyAndRetry()"
+                >
+                  Remove old key &amp; retry
+                </button>
                 <button
                   class="px-3 py-1.5 rounded-lg bg-otter-surface border border-otter-border
                          text-xs text-otter-text hover:border-otter-subtle transition-colors"

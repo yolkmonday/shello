@@ -10,15 +10,57 @@ use tokio::net::TcpStream;
 use tokio::sync::Mutex;
 use tokio::time::{timeout, Duration};
 
+use russh::keys::known_hosts::check_known_hosts;
+use russh::keys::HashAlg;
+
 use super::types::{AuthMethod, ConnectionConfig};
 
 /// Remote-forward routing table: server bind port → local target (host, port).
 pub(crate) type Forwards = Arc<Mutex<HashMap<u16, (String, u16)>>>;
 
+/// Remove a host's entries from `~/.ssh/known_hosts` (used to recover from a
+/// changed-key rejection). Only plain (non-hashed) entries are matched.
+pub fn forget_host_key(host: &str, port: u16) -> Result<()> {
+    let path = dirs::home_dir()
+        .context("no home directory")?
+        .join(".ssh")
+        .join("known_hosts");
+    if !path.exists() {
+        return Ok(());
+    }
+    let content = std::fs::read_to_string(&path)?;
+    let needle_port = format!("[{}]:{}", host, port);
+    let kept: Vec<&str> = content
+        .lines()
+        .filter(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() || trimmed.starts_with('#') {
+                return true;
+            }
+            let first = trimmed.split_whitespace().next().unwrap_or("");
+            !first.split(',').any(|h| h == host || h == needle_port)
+        })
+        .collect();
+    std::fs::write(&path, format!("{}\n", kept.join("\n")))?;
+    Ok(())
+}
+
+/// An unknown server key awaiting the user's confirmation.
+#[derive(Clone)]
+pub(crate) struct PendingHostKey {
+    pub key: russh::keys::PublicKey,
+    pub fingerprint: String,
+}
+
+pub(crate) type PendingSlot = Arc<Mutex<Option<PendingHostKey>>>;
+
 // ── SSH Event Handler ────────────────────────────────────────────────
 
 pub(crate) struct SshHandler {
     forwards: Forwards,
+    host: String,
+    port: u16,
+    pending: PendingSlot,
 }
 
 impl client::Handler for SshHandler {
@@ -26,10 +68,36 @@ impl client::Handler for SshHandler {
 
     async fn check_server_key(
         &mut self,
-        _server_public_key: &russh::keys::PublicKey,
+        server_public_key: &russh::keys::PublicKey,
     ) -> Result<bool, Self::Error> {
-        warn!("Accepting server key (TOFU)");
-        Ok(true)
+        match check_known_hosts(&self.host, self.port, server_public_key) {
+            // Known host, key matches.
+            Ok(true) => Ok(true),
+            // Unknown host: defer to a post-connect confirmation prompt.
+            Ok(false) => {
+                let fingerprint = server_public_key.fingerprint(HashAlg::Sha256).to_string();
+                *self.pending.lock().await = Some(PendingHostKey {
+                    key: server_public_key.clone(),
+                    fingerprint,
+                });
+                Ok(true)
+            }
+            // Recorded key no longer matches — refuse (possible MITM).
+            Err(russh::keys::Error::KeyChanged { .. }) => Err(anyhow::anyhow!(
+                "host_key_changed: SSH host key for {} has changed — possible man-in-the-middle attack. Connection refused.",
+                self.host
+            )),
+            // Other errors (e.g. missing known_hosts): treat as a new host.
+            Err(e) => {
+                warn!("known_hosts check failed ({}); treating {} as a new host", e, self.host);
+                let fingerprint = server_public_key.fingerprint(HashAlg::Sha256).to_string();
+                *self.pending.lock().await = Some(PendingHostKey {
+                    key: server_public_key.clone(),
+                    fingerprint,
+                });
+                Ok(true)
+            }
+        }
     }
 
     /// A connection arrived on a server-side `-R` forward. Route it to the
@@ -69,6 +137,7 @@ impl client::Handler for SshHandler {
 pub struct SshClient {
     handle: client::Handle<SshHandler>,
     forwards: Forwards,
+    pending: PendingSlot,
     pub host: String,
     pub port: u16,
     pub username: String,
@@ -83,8 +152,12 @@ impl SshClient {
         });
 
         let forwards: Forwards = Arc::new(Mutex::new(HashMap::new()));
+        let pending: PendingSlot = Arc::new(Mutex::new(None));
         let handler = SshHandler {
             forwards: forwards.clone(),
+            host: config.host.clone(),
+            port: config.port,
+            pending: pending.clone(),
         };
         let timeout_secs = config.timeout_secs;
         let mut handle = timeout(
@@ -132,6 +205,7 @@ impl SshClient {
         Ok(Self {
             handle,
             forwards,
+            pending,
             host: config.host,
             port: config.port,
             username: config.username,
@@ -146,6 +220,11 @@ impl SshClient {
     /// The remote-forward routing table, shared with the SSH event handler.
     pub fn forwards(&self) -> Forwards {
         self.forwards.clone()
+    }
+
+    /// The slot holding an unverified host key awaiting user confirmation.
+    pub fn pending(&self) -> PendingSlot {
+        self.pending.clone()
     }
 
     pub async fn exec(&mut self, command: &str) -> Result<String> {
