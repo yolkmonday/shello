@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="assets/banner.png" alt="Shello — local-first SSH terminal" width="820" />
+</p>
+
 # Shello
 
 **Dive into any server.** Lightweight SSH client built with Tauri 2.0 + Vue 3 + Rust.
