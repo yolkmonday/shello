@@ -19,6 +19,13 @@ const props = defineProps<{
   sessionId: string;
 }>();
 
+const emit = defineEmits<{
+  toggleRecord: [];
+  pauseRecord: [];
+  resumeRecord: [];
+  screenshot: [];
+}>();
+
 const store = useTerminalStore();
 const snippetsStore = useSnippetsStore();
 const terminalRef = ref<HTMLDivElement>();
@@ -560,7 +567,7 @@ watch(() => store.bellStyle, (b) => { if (terminal) /* bellStyle removed in xter
       <button
         class="ml-1 w-4 h-4 flex items-center justify-center rounded hover:bg-white/20 transition-colors"
         :title="isPaused ? 'Resume' : 'Pause'"
-        @click.stop="isPaused ? $emit('resumeRecord') : $emit('pauseRecord')"
+        @click.stop="isPaused ? emit('resumeRecord') : emit('pauseRecord')"
       >
         <Icon :icon="isPaused ? 'mdi:play' : 'mdi:pause'" class="w-3 h-3" />
       </button>
@@ -686,7 +693,7 @@ watch(() => store.bellStyle, (b) => { if (terminal) /* bellStyle removed in xter
         <button
           class="flex items-center gap-1 px-1.5 py-0.5 rounded hover:bg-white/10 transition-colors"
           :style="{ color: themes[store.theme].brightBlack }"
-          @click="$emit('screenshot')"
+          @click="emit('screenshot')"
         >
           <Icon icon="mdi:camera-outline" class="w-3 h-3" />
           <span>Screenshot</span>
@@ -695,7 +702,7 @@ watch(() => store.bellStyle, (b) => { if (terminal) /* bellStyle removed in xter
           class="flex items-center gap-1 px-1.5 py-0.5 rounded transition-colors"
           :class="isRecording ? 'animate-pulse' : ''"
           :style="{ color: isRecording ? '#f87171' : themes[store.theme].brightBlack }"
-          @click="$emit('toggleRecord')"
+          @click="emit('toggleRecord')"
         >
           <Icon :icon="isRecording ? 'mdi:stop-circle' : 'mdi:record-circle-outline'" class="w-3 h-3" />
           <span>{{ isRecording ? 'Stop' : 'Record' }}</span>

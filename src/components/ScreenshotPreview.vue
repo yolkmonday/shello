@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, nextTick } from "vue";
 import { toPng } from "html-to-image";
 import { Icon } from "@iconify/vue";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import type { SerializedTerminal } from "../lib/terminal-to-html";
 import LogoWordmark from "./LogoWordmark.vue";
 
@@ -119,12 +121,32 @@ async function exportPng() {
     }
 
     const dataUrl = await toPng(frameRef.value, opts);
-    const a = document.createElement("a");
+
+    // Convert data URL to binary
+    const base64 = dataUrl.split(",")[1];
+    const binaryString = atob(base64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+
+    // Show save dialog
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
     const sizeSuffix = preset && preset.width > 0 ? `-${preset.width}x${preset.height}` : "";
-    a.href = dataUrl;
-    a.download = `shello-${props.title.replace(/[^a-zA-Z0-9]/g, "-")}${sizeSuffix}-${ts}.png`;
-    a.click();
+    const defaultName = `shello-${props.title.replace(/[^a-zA-Z0-9]/g, "-")}${sizeSuffix}-${ts}.png`;
+
+    const filePath = await save({
+      title: "Save Screenshot",
+      defaultPath: defaultName,
+      filters: [{ name: "PNG Image", extensions: ["png"] }],
+    });
+
+    if (!filePath) {
+      exporting.value = false;
+      return;
+    }
+
+    await writeFile(filePath, bytes);
   } catch (e) {
     console.error("Export failed:", e);
   } finally {

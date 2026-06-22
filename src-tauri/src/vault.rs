@@ -433,3 +433,32 @@ pub async fn vault_forget_device(
     vault.lock();
     Ok(())
 }
+
+/// Reset vault and wipe all stored credentials. Does NOT require vault to be
+/// unlocked — this is a destructive "factory reset" that clears everything:
+/// vault config, all encrypted credentials, and the OS keychain entry.
+#[tauri::command]
+pub async fn vault_reset(
+    pool: tauri::State<'_, DbPool>,
+    vault: tauri::State<'_, VaultState>,
+) -> Result<(), String> {
+    let mut tx = pool.begin().await.map_err(|e| e.to_string())?;
+
+    // Wipe all credentials from profiles
+    sqlx::query("UPDATE profiles SET password_enc = NULL, key_path_enc = NULL, passphrase_enc = NULL")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    // Delete vault config
+    sqlx::query("DELETE FROM vault_config")
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| e.to_string())?;
+
+    tx.commit().await.map_err(|e| e.to_string())?;
+
+    let _ = keychain_delete();
+    vault.lock();
+    Ok(())
+}

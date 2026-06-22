@@ -2,6 +2,8 @@
 import { ref, computed, onMounted, onUnmounted, nextTick } from "vue";
 import { Icon } from "@iconify/vue";
 import { Terminal } from "@xterm/xterm";
+import { save } from "@tauri-apps/plugin-dialog";
+import { writeFile } from "@tauri-apps/plugin-fs";
 import { themes } from "../lib/themes";
 import type { TerminalRecording } from "../lib/terminal-recording";
 import LogoWordmark from "./LogoWordmark.vue";
@@ -362,14 +364,28 @@ async function exportVideo() {
     const mimeType = getSupportedMimeType();
     const ext = mimeType.includes("mp4") ? "mp4" : "webm";
     const blob = new Blob(chunks, { type: mimeType });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
+
+    // Convert blob to bytes
+    const arrayBuffer = await blob.arrayBuffer();
+    const bytes = new Uint8Array(arrayBuffer);
+
+    // Show save dialog
     const ts = new Date().toISOString().replace(/[:.]/g, "-");
-    a.href = url;
     const sizeSuffix = preset.width > 0 ? `-${preset.width}x${preset.height}` : "";
-    a.download = `shello-${props.title.replace(/[^a-zA-Z0-9]/g, "-")}${sizeSuffix}-${ts}.${ext}`;
-    a.click();
-    URL.revokeObjectURL(url);
+    const defaultName = `shello-${props.title.replace(/[^a-zA-Z0-9]/g, "-")}${sizeSuffix}-${ts}.${ext}`;
+
+    const filePath = await save({
+      title: "Save Recording",
+      defaultPath: defaultName,
+      filters: [{ name: ext === "mp4" ? "MP4 Video" : "WebM Video", extensions: [ext] }],
+    });
+
+    if (!filePath) {
+      cleanup();
+      return;
+    }
+
+    await writeFile(filePath, bytes);
 
     function cleanup() {
       exportTerm.dispose();

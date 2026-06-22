@@ -136,6 +136,33 @@ async function disableVault() {
   }
 }
 
+async function resetVault() {
+  vaultMessage.value = "";
+  const ok = await confirm(
+    "This will permanently delete ALL saved credentials (passwords, key paths, passphrases) and reset the vault. This action cannot be undone.\n\nAre you sure?",
+    { title: "Reset Vault", kind: "warning" },
+  );
+  if (!ok) return;
+
+  // Double confirm
+  const sure = await confirm(
+    "Type 'yes' or click OK to confirm deletion of all credentials.",
+    { title: "Final Confirmation", kind: "warning" },
+  );
+  if (!sure) return;
+
+  try {
+    await invoke("vault_reset");
+    await profilesStore.checkVaultStatus();
+    vaultMessage.value = "Vault reset. All credentials have been cleared.";
+    setTimeout(() => {
+      vaultMessage.value = "";
+    }, 5000);
+  } catch (e) {
+    vaultMessage.value = String(e);
+  }
+}
+
 async function exportProfiles() {
   const profiles = Object.values(profilesStore.profiles);
   const groups = Object.values(profilesStore.groups);
@@ -167,6 +194,15 @@ async function importProfiles() {
     filters: [{ name: "JSON", extensions: ["json"] }],
   });
   if (!selected) return;
+
+  // Check vault status before import
+  await profilesStore.checkVaultStatus();
+  if (profilesStore.vaultStatus.initialized && !profilesStore.vaultStatus.unlocked) {
+    importError.value = true;
+    importMessage.value = "Vault is locked. Please unlock it first in the Vault section below.";
+    setTimeout(() => { importMessage.value = ""; }, 5000);
+    return;
+  }
 
   try {
     const text = await readTextFile(selected);
@@ -651,6 +687,17 @@ async function importProfiles() {
           >
             <p class="text-sm text-otter-text">Forget This Device</p>
             <p class="text-xs text-otter-subtle mt-0.5">Remove saved vault key from OS keychain</p>
+          </button>
+
+          <!-- Reset Vault -->
+          <button
+            v-if="profilesStore.vaultStatus.initialized"
+            class="w-full bg-otter-card border border-otter-coral/30 rounded-xl px-5 py-4
+                   text-left hover:border-otter-coral/60 transition-colors"
+            @click="resetVault"
+          >
+            <p class="text-sm text-otter-coral">Reset Vault</p>
+            <p class="text-xs text-otter-subtle mt-0.5">Delete all credentials and reset vault (cannot be undone)</p>
           </button>
         </div>
 

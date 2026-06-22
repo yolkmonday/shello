@@ -86,7 +86,13 @@ export function useProfileForm(
       emit.saved();
       emit.close();
     } catch (e) {
-      error.value = String(e);
+      const err = String(e);
+      if (err.includes("vault_locked") && profilesStore.onVaultLocked) {
+        saving.value = false;
+        profilesStore.onVaultLocked(() => save());
+        return;
+      }
+      error.value = err;
     } finally {
       saving.value = false;
     }
@@ -139,7 +145,13 @@ export function useProfileForm(
       emit.connected(sessionId);
       emit.close();
     } catch (e) {
-      error.value = String(e);
+      const err = String(e);
+      if (err.includes("vault_locked") && profilesStore.onVaultLocked) {
+        connecting.value = false;
+        profilesStore.onVaultLocked(() => saveAndConnect());
+        return;
+      }
+      error.value = err;
     } finally {
       connecting.value = false;
     }

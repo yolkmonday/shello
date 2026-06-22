@@ -65,6 +65,14 @@ watch(
 async function runImport() {
   const toImport = rows.value.filter((r) => r.selected && !r.exists);
   if (toImport.length === 0) return;
+
+  // Check vault status before import
+  await store.checkVaultStatus();
+  if (store.vaultStatus.initialized && !store.vaultStatus.unlocked) {
+    error.value = "Vault is locked. Please unlock it in Settings first.";
+    return;
+  }
+
   importing.value = true;
   error.value = "";
   let ok = 0;

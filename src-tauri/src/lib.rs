@@ -595,6 +595,7 @@ pub fn run() {
             vault::vault_change_password,
             vault::vault_forget_device,
             vault::vault_disable,
+            vault::vault_reset,
             host_key_respond,
             ssh_forget_host_key,
             sftp::sftp_open,
